@@ -200,7 +200,7 @@ function armHandSvg(a, st, t, env) {
   const fa = deg(Math.atan2(a.wrist[1] - a.elbow[1], a.wrist[0] - a.elbow[0]));   // направление предплечья
   return handSvg(a.hand, a.side, a.wrist[0], a.wrist[1], fa + a.rot, a.rig) + (a.prop ? propSvg(a, st, t, env) : '');
 }
-// слой 'behind' — до стола; 'front' — после ноутбука. 'desk': рукав в behind, кисть во front.
+// слой 'behind' — до стола; 'front' — после ноутбука. 'desk': рукав в behind, кисть во front. 'back' — за торсом (дальняя рука при повороте).
 // Предмет в кисти (prop) рисуется сразу после кисти, в её слое; st/t/env нужны только предметам (опц.)
 function armsSvg(arms, layer, st, t, env) {
   if (!arms) return '';
@@ -263,7 +263,7 @@ function rigLegs(keys, t, rig, turn = 0) {
 // 40 % — перенос вперёд по дуге с подъёмом lift. Правая нога сдвинута на полцикла → двойная опора на стыках.
 // Таз ниже всего в двойной опоре (hipDy + WALK_BOB). Путь идёт вдоль экранной x, поэтому шаг проецируется на x ПОЛНОСТЬЮ при любом
 // повороте (3/4 — условность «идёт поперёк кадра лицом к зрителю»); иначе опорная стопа скользит. w = { phase, dir, vRel, stride }.
-const WALK_DUTY = .6, WALK_BOB = 8, WALK_LIFT = 34;
+const WALK_DUTY = .6, WALK_BOB = 8, WALK_LIFT = 34, WALK_TURN = .5;   // WALK_TURN — поворот на ходу по умолчанию (3/4)
 function walkLegs(rig, w, turn) {
   const LR = legsRigOf(rig), S = w.stride, at = Math.min(1, Math.abs(turn)), dir = w.dir || 1;
   const hipDy = WALK_BOB * (1 - Math.cos(4 * Math.PI * (w.phase - WALK_DUTY / 2))) / 2;
@@ -289,7 +289,8 @@ function mixLegs(a, b, k) {
   return out;
 }
 // цвет темнее на долю k (дальние рука/нога при повороте — приём, чтобы конечности не сливались)
-const shade = (hex, k) => '#' + [1, 3, 5].map(i => Math.round(parseInt(hex.slice(i, i + 2), 16) * (1 - k)).toString(16).padStart(2, '0')).join('');
+const shade = (hex, k) => !/^#[0-9a-f]{6}$/i.test(hex) ? hex   // не hex (имя цвета, url(#…)) — как есть
+  : '#' + [1, 3, 5].map(i => Math.round(parseInt(hex.slice(i, i + 2), 16) * (1 - k)).toString(16).padStart(2, '0')).join('');
 // стопа: анфас — ботинок-овал под лодыжкой, носок чуть наружу; при повороте носок вытягивается вперёд по ходу взгляда.
 // footAng — наклон стопы (°), положительный — носок вниз (виден только сбоку); shoe — цвет (дальняя нога темнее)
 function footSvg(l, side, R, turn = 0, shoe = R.shoe) {

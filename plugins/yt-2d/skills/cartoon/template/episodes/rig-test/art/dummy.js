@@ -12,31 +12,38 @@ CHARS.dummy = {
     legs: { L: { hip: [318, 1012], len: [128, 124], bend: 1 }, R: { hip: [402, 1012], len: [128, 124], bend: -1 },
             width: 58, trouser: DUM.trouser, shoe: DUM.shoe, ankle: 18 },
   },
+  // поворот st.turn (−1…1, + — лицом вправо): торс и голова уже, черты лица смещаются по ходу взгляда, дальний глаз уже
   body(st, P) {
-    const b = (st.bob || 0) * .4;
+    const b = (st.bob || 0) * .4, at = Math.min(1, Math.abs(st.turn || 0)), k = 1 - .3 * at;
+    const X = x => (360 + (x - 360) * k).toFixed(1);
     return `<g transform="translate(0,${b})">
-      <rect x="335" y="690" width="50" height="96" fill="${DUM.skin}" stroke="${S}" stroke-width="${W}"/>
-      <path d="M300,770 L420,770 C468,774 488,800 488,842 L470,1000 C467,1030 452,1044 430,1044 L290,1044 C268,1044 253,1030 250,1000 L232,842 C232,800 252,774 300,770 Z"
+      <rect x="${X(335)}" y="690" width="${(50 * (1 - .15 * at)).toFixed(1)}" height="96" fill="${DUM.skin}" stroke="${S}" stroke-width="${W}"/>
+      <path d="M${X(300)},770 L${X(420)},770 C${X(468)},774 ${X(488)},800 ${X(488)},842 L${X(470)},1000 C${X(467)},1030 ${X(452)},1044 ${X(430)},1044 L${X(290)},1044 C${X(268)},1044 ${X(253)},1030 ${X(250)},1000 L${X(232)},842 C${X(232)},800 ${X(252)},774 ${X(300)},770 Z"
         fill="${DUM.body}" stroke="${S}" stroke-width="${W}" stroke-linejoin="round"/>
-      <path d="M360,790 L360,1030" stroke="${DUM.bodyDk}" stroke-width="4" opacity=".6"/>
-      <path d="M262,1006 L458,1006" stroke="${DUM.bodyDk}" stroke-width="5" opacity=".7"/>
+      <path d="M${(360 + (st.turn || 0) * 40).toFixed(1)},790 L${(360 + (st.turn || 0) * 40).toFixed(1)},1030" stroke="${DUM.bodyDk}" stroke-width="4" opacity=".6"/>
+      <path d="M${X(262)},1006 L${X(458)},1006" stroke="${DUM.bodyDk}" stroke-width="5" opacity=".7"/>
     </g>`;
   },
   head(st, P) {
-    const { lid = .5, pr = 8, mouth = 0, bob = 0 } = st, y0 = bob;
-    const eye = cx => lid > .9
-      ? `<path d="M${cx - 16},${580 + y0} q16,6 32,0" stroke="${S}" stroke-width="5" fill="none" stroke-linecap="round"/>`
-      : `<ellipse cx="${cx}" cy="${580 + y0}" rx="17" ry="21" fill="#f7f4ee" stroke="${S}" stroke-width="5"/>
-         <circle cx="${cx}" cy="${584 + y0}" r="${pr}" fill="#1e140e"/>`;
+    const { lid = .5, pr = 8, mouth = 0, bob = 0 } = st, y0 = bob, tn = st.turn || 0, at = Math.min(1, Math.abs(tn));
+    const fx = x => 360 + (x - 360) * (1 - .45 * at) + tn * 62;   // черты лица: сжимаются и едут по ходу взгляда
+    const eye = (cx0, far) => {
+      const cx = fx(cx0), rx = 17 * (far ? 1 - .45 * at : 1);
+      return lid > .9
+        ? `<path d="M${(cx - rx).toFixed(1)},${580 + y0} q${rx.toFixed(1)},6 ${(2 * rx).toFixed(1)},0" stroke="${S}" stroke-width="5" fill="none" stroke-linecap="round"/>`
+        : `<ellipse cx="${cx.toFixed(1)}" cy="${580 + y0}" rx="${rx.toFixed(1)}" ry="21" fill="#f7f4ee" stroke="${S}" stroke-width="5"/>
+           <circle cx="${(cx + tn * 5).toFixed(1)}" cy="${584 + y0}" r="${pr}" fill="#1e140e"/>`;
+    };
+    const mx = fx(360);
     const mouthSvg = mouth > .05
-      ? `<ellipse cx="360" cy="${666 + y0}" rx="14" ry="${3 + mouth * 10}" fill="#4a1f17" stroke="${S}" stroke-width="4"/>`
-      : `<path d="M342,${664 + y0} q18,6 36,0" stroke="${S}" stroke-width="5" fill="none" stroke-linecap="round"/>`;
+      ? `<ellipse cx="${mx.toFixed(1)}" cy="${666 + y0}" rx="14" ry="${3 + mouth * 10}" fill="#4a1f17" stroke="${S}" stroke-width="4"/>`
+      : `<path d="M${(mx - 18).toFixed(1)},${664 + y0} q18,6 36,0" stroke="${S}" stroke-width="5" fill="none" stroke-linecap="round"/>`;
     return `<g>
-      <ellipse cx="360" cy="${585 + y0}" rx="112" ry="128" fill="${DUM.skin}" stroke="${S}" stroke-width="${W}"/>
-      <ellipse cx="300" cy="${640 + y0}" rx="22" ry="12" fill="${DUM.skinDk}" opacity=".6"/>
-      <ellipse cx="420" cy="${640 + y0}" rx="22" ry="12" fill="${DUM.skinDk}" opacity=".6"/>
-      ${eye(318)}${eye(402)}
-      <circle cx="360" cy="${622 + y0}" r="11" fill="${DUM.bodyDk}" stroke="${S}" stroke-width="4"/>
+      <ellipse cx="360" cy="${585 + y0}" rx="${(112 * (1 - .1 * at)).toFixed(1)}" ry="128" fill="${DUM.skin}" stroke="${S}" stroke-width="${W}"/>
+      <ellipse cx="${fx(300).toFixed(1)}" cy="${640 + y0}" rx="22" ry="12" fill="${DUM.skinDk}" opacity=".6"/>
+      <ellipse cx="${fx(420).toFixed(1)}" cy="${640 + y0}" rx="22" ry="12" fill="${DUM.skinDk}" opacity=".6"/>
+      ${eye(318, tn > 0)}${eye(402, tn < 0)}
+      <circle cx="${(360 + tn * 92).toFixed(1)}" cy="${622 + y0}" r="11" fill="${DUM.bodyDk}" stroke="${S}" stroke-width="4"/>
       ${mouthSvg}
     </g>`;
   },

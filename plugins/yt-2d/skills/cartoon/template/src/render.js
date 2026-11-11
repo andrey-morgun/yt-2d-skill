@@ -50,13 +50,15 @@ function charState(t, shot, who) {
     const rig = (CHARS[who] && CHARS[who].rig) || {};
     const poses = resolvePoses(C.poses, who);   // ключи { t, pose:'fingerUp', … } → wrist/hand/… (src/presets.js); без пресетов — тот же объект
     const arms = rigArms(poses, t, bob, rig);
+    // поворот корпуса turn (−1…1, + — лицом вправо; ±0.5 — 3/4): трек tracks.turn, иначе на ходу — сам, в сторону движения
+    // (WALK_TURN, вместе с разгоном по vRel), а остановившись — обратно лицом к камере
+    const P = C.path ? pathAt(C.path, t) : null;
+    const turn = tr.turn ?? (P ? P.dir * (C.walkTurn ?? WALK_TURN) * P.vRel : 0);
     // ноги — только если эпизод задал стойку (poses.legs) или путь (path) и у персонажа есть rig.legs; иначе как раньше (по пояс)
-    const turn = tr.turn ?? 0;
     const legKeys = C.poses && C.poses.legs ? resolveLegs(C.poses.legs, who) : (C.path && legsRigOf(rig) ? resolveLegs(STAND_KEYS, who) : null);
     let legs = legKeys ? rigLegs(legKeys, t, rig, turn) : null;
     // ходьба: путь (src/path.js) → фаза шага от пройденного пути в локальных px (мировой путь / масштаб размещения);
     // стойка смешивается с циклом шага по vRel (разгон/торможение), руки с swing машут в противофазе ногам
-    const P = C.path ? pathAt(C.path, t) : null;
     if (legs && P && P.vRel > 0) {
       const stride = C.stride ?? (rig.legs && rig.legs.stride) ?? WALK_STRIDE;
       const walk = { phase: P.dist / Math.abs(placementOf(who, shot.cast).s) / stride, dir: P.dir, vRel: P.vRel, stride };
@@ -64,6 +66,16 @@ function charState(t, shot, who) {
       for (const a of Object.values(arms)) if (a.swing) {   // мах вдоль хода (экранная x), как и шаг
         const dx = (a.side === 'L' ? -1 : 1) * 46 * P.vRel * a.swing * Math.cos(2 * Math.PI * walk.phase) * walk.dir;
         a.wrist = [a.wrist[0] + dx, a.wrist[1]]; a.elbow = [a.elbow[0] + dx * .45, a.elbow[1]];
+      }
+    }
+    // поворот: плечи сходятся к оси корпуса (рука едет вместе с плечом — жест сохраняется); дальняя рука — за торсом (слой back)
+    // и темнее. L — рука слева на экране анфас: лицом вправо (turn > 0) дальняя — R.
+    if (turn) {
+      const at = Math.min(1, Math.abs(turn)), far = turn > 0 ? 'R' : 'L';
+      for (const a of Object.values(arms)) {
+        const dx = (360 - a.shoulder[0]) * .55 * at;
+        a.shoulder = [a.shoulder[0] + dx, a.shoulder[1]]; a.elbow = [a.elbow[0] + dx, a.elbow[1]]; a.wrist = [a.wrist[0] + dx, a.wrist[1]];
+        if (a.side === far && at > .2) { a.layer = 'back'; a.rig = { ...a.rig, sleeve: shade(a.rig.sleeve, .18 * at), skin: shade(a.rig.skin, .18 * at) }; }
       }
     }
     const holds = name => Object.values(arms).some(a => a.prop === name);
@@ -81,6 +93,7 @@ function charState(t, shot, who) {
     };
     for (const k in tr) if (!(k in st)) st[k] = tr[k];   // свои поля (glasses, gaze, …); lid/look/glow/squint уже учтены выше
     if (legs) st.legs = legs;   // { hipDy, L, R, rig } — stage.js рисует ноги и сдвигает корпус на hipDy
+    if (turn) st.turn = turn;   // персонаж сам рисует голову/торс в повороте (CHARS.<who>.head/body читают st.turn)
     return st;
   }
 

@@ -55,9 +55,10 @@ function stageDraw(t, shot) {
   // слой ног: behind — под торсом; front (сидя анфас) — поверх торса, но под руками и головой
   const behind = members.map(({ ch, st, pl, P }) => {
     const armsHead = `${armsSvg(st.arms, 'behind', st, t, env)}<g transform="rotate(${(st.tilt || 0).toFixed(2)} 360 700)">${ch.head(st, P)}</g>`;
-    if (!st.legs) return `<g transform="${pl.transform}">${ch.body(st, P)}${armsHead}</g>`;
+    const back = armsSvg(st.arms, 'back', st, t, env);   // дальняя рука при повороте — до торса
+    if (!st.legs) return `<g transform="${pl.transform}">${back}${ch.body(st, P)}${armsHead}</g>`;
     const legs = legsSvg(st.legs), front = st.legs.layer === 'front';
-    return `<g transform="${pl.transform}">${front ? '' : legs}${hip(st, ch.body(st, P))}${front ? legs : ''}${hip(st, armsHead)}</g>`;
+    return `<g transform="${pl.transform}">${back ? hip(st, back) : ''}${front ? '' : legs}${hip(st, ch.body(st, P))}${front ? legs : ''}${hip(st, armsHead)}</g>`;
   }).join('');
   const fore = members.map(({ st, pl }) => { const a = armsSvg(st.arms, 'front', st, t, env); return a ? `<g transform="${pl.transform}">${hip(st, a)}</g>` : ''; }).join('');
   let scene = (back ? back(t, env) : '') + behind + (front ? front(t, env) : '') + fore;
