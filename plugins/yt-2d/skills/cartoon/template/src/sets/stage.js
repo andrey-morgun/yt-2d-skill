@@ -50,8 +50,13 @@ function stageDraw(t, shot) {
   const back = stageFn(shot.back ?? SG.back, 'back'), front = stageFn(shot.front ?? SG.front, 'front');
   // с ногами (st.legs): ноги — до торса, а торс, руки и голова сдвинуты на hipDy (сел — опустились вместе с бёдрами)
   const hip = (st, inner) => st.legs ? `<g transform="translate(0,${st.legs.hipDy.toFixed(1)})">${inner}</g>` : inner;
-  const behind = members.map(({ ch, st, pl, P }) =>
-    `<g transform="${pl.transform}">${st.legs ? legsSvg(st.legs) : ''}${hip(st, `${ch.body(st, P)}${armsSvg(st.arms, 'behind', st, t, env)}<g transform="rotate(${(st.tilt || 0).toFixed(2)} 360 700)">${ch.head(st, P)}</g>`)}</g>`).join('');
+  // слой ног: behind — под торсом; front (сидя анфас) — поверх торса, но под руками и головой
+  const behind = members.map(({ ch, st, pl, P }) => {
+    const armsHead = `${armsSvg(st.arms, 'behind', st, t, env)}<g transform="rotate(${(st.tilt || 0).toFixed(2)} 360 700)">${ch.head(st, P)}</g>`;
+    if (!st.legs) return `<g transform="${pl.transform}">${ch.body(st, P)}${armsHead}</g>`;
+    const legs = legsSvg(st.legs), front = st.legs.layer === 'front';
+    return `<g transform="${pl.transform}">${front ? '' : legs}${hip(st, ch.body(st, P))}${front ? legs : ''}${hip(st, armsHead)}</g>`;
+  }).join('');
   const fore = members.map(({ st, pl }) => { const a = armsSvg(st.arms, 'front', st, t, env); return a ? `<g transform="${pl.transform}">${hip(st, a)}</g>` : ''; }).join('');
   let scene = (back ? back(t, env) : '') + behind + (front ? front(t, env) : '') + fore;
 

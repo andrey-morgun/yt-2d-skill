@@ -216,8 +216,10 @@ function armsSvg(arms, layer, st, t, env) {
 //   width, trouser, shoe, ankle }. Нет блока — ног нет (персонажи за столом рисуются как раньше).
 // Пол — локальный y = FLOOR: стоя подошвы на полу; размещение масштабирует вокруг (360, FLOOR) → ноги не отрываются от пола.
 // Ключи стойки — TIMELINE.cast[who].poses.legs: [{ t, pose:'stand' | …, dur? }] (пресеты — LEG_POSES в presets.js) раскрываются в
-//   { t, dur?, hipDy, L:{ ankle:[x,y], knee?:[x,y], bend?, footAng? }, R:{…} }
-//   hipDy — сдвиг бёдер по y (+ вниз): вместе с бёдрами едут торс, руки и голова (stage.js); knee — явное колено вместо IK.
+//   { t, dur?, hipDy, layer?, L:{ ankle:[x,y], knee?:[x,y], bend?, footAng? }, R:{…} }
+//   hipDy — сдвиг бёдер по y (+ вниз): вместе с бёдрами едут торс, руки и голова (stage.js); knee — явное колено вместо IK;
+//   layer — 'behind' (по умолчанию: ноги под торсом) | 'front' (сидя анфас: бёдра к камере, поверх низа торса);
+//   hipDy, L, R могут быть функциями ctx = { turn } → значение (стойка, зависящая от поворота / фазы шага).
 // Переход между ключами — easeInOut без перелёта (snap рук перелетает, и стопа ушла бы под пол).
 // Колено без явного knee: анфас (turn 0) колено гнётся К КАМЕРЕ — в проекции нога прямая (лежит на линии бедро→лодыжка,
 // просто короче); в профиль (|turn| 1) изгиб виден сбоку — IK с изгибом вперёд по ходу взгляда. Между ними — смесь по |turn|.
@@ -237,10 +239,11 @@ function rigLegs(keys, t, rig, turn = 0) {
   const LR = legsRigOf(rig);
   if (!LR || !keys || !keys.length) return null;
   const { a, b, k } = keyAt(keys, t, (rig && rig.dur) ?? RIG.dur), e = easeInOut(k);
-  const hA = a.hipDy ?? 0, hB = b.hipDy ?? 0, hipDy = lerp(hA, hB, e);
-  const out = { hipDy, rig: LR };
+  const ctx = { turn }, ev = v => typeof v === 'function' ? v(ctx) : v;
+  const hA = ev(a.hipDy) ?? 0, hB = ev(b.hipDy) ?? 0, hipDy = lerp(hA, hB, e);
+  const out = { hipDy, layer: (k >= .5 ? b : a).layer ?? 'behind', rig: LR };
   for (const side of ['L', 'R']) {
-    const cfg = LR[side], A = a[side], B = b[side];
+    const cfg = LR[side], A = ev(a[side]), B = ev(b[side]);
     const kneeOf = (K, hy) => K.knee || kneeAuto([cfg.hip[0], cfg.hip[1] + hy], K.ankle, cfg, turn, K.bend);
     const kA = kneeOf(A, hA), kB = kneeOf(B, hB);
     out[side] = {

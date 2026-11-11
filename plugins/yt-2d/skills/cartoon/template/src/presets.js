@@ -190,6 +190,13 @@ const LEG_POSES = {
   stand: ({ LR }) => ({ hipDy: 0,
     L: { ankle: [LR.L.hip[0] - 4, FLOOR - LR.ankle] },
     R: { ankle: [LR.R.hip[0] + 4, FLOOR - LR.ankle] } }),
+  // сидя анфас: сиденье на высоте колена стоя (или k.seat — локальный y бёдер), бёдра к камере — в проекции короткие,
+  // колени чуть ниже и шире бёдер, голени отвесно до пола; ноги поверх низа торса (layer front)
+  sit: ({ LR, k }) => {
+    const hipY = k.seat ?? (FLOOR - LR.ankle - LR.L.len[1] + 4), hipDy = hipY - LR.L.hip[1];
+    const leg = (H, out) => { const kx = H[0] + out * 10; return { knee: [kx, hipY + 14], ankle: [kx, FLOOR - LR.ankle] }; };
+    return { hipDy, layer: 'front', L: leg(LR.L.hip, -1), R: leg(LR.R.hip, 1) };
+  },
 };
 const _legs = new WeakMap();
 function resolveLegs(keys, who) {
@@ -202,7 +209,8 @@ function resolveLegs(keys, who) {
     const fn = LEG_POSES[k.pose];
     if (!fn) throw new Error(`стойка "${k.pose}" у ${who}: неизвестный пресет (есть: ${Object.keys(LEG_POSES).join(', ')})`);
     const { pose, ...rest } = k, p = fn({ LR, k });
-    return { ...p, ...rest, L: { ...p.L, ...(rest.L || {}) }, R: { ...p.R, ...(rest.R || {}) } };
+    const side = s => typeof p[s] === 'function' || !rest[s] ? p[s] : { ...p[s], ...rest[s] };   // переопределения — только у статичных стоек
+    return { ...p, ...rest, L: side('L'), R: side('R') };
   });
   _legs.set(keys, out);
   return out;
