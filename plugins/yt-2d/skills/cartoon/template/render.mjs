@@ -7,14 +7,15 @@
 //              нужен OPENROUTER_API_KEY: node --env-file=.env render.mjs …) и подмешать её; с --sfx фоли приглушаются на −6 dB под речью
 //   --preview  быстрый черновик: = --dsf 1 --preset veryfast (контакт-лист, проверка движения)
 //   --final    чистовой: = --dsf 2 --preset slow (умолчание); явные --dsf/--preset перекрывают оба
-//   --keep-frames  не удалять PNG-кадры после сборки mp4 (по умолчанию удаляются: 80 с ролика ≈ 10 ГБ; --stills не трогает)
+//   --keep-frames  дополнительно сохранить PNG-кадры в FRAMES_DIR (отладка). Без него кадры идут в ffmpeg через pipe и на диск
+//              не пишутся (80 с ролика 720×1280 ≈ 3.4 ГБ PNG при dsf 1, 1080p — в 2.25× больше)
 //   Если в TIMELINE есть voice, а episodes/<ep>/voice.js ещё нет, он собирается автоматически БЕЗ API (voice/build.mjs --no-api):
 //   реплики из кэша, остальные — заглушки по оценке длительности. Настоящая озвучка — только по --voice.
 //   --jobs N   параллельных процессов Chrome (кадры независимы; по умолчанию min(4, cpu-2); 4 ≈ 7× быстрее одного)
 //   --dsf N    deviceScaleFactor (2 = суперсэмплинг: снимаем вдвое крупнее и уменьшаем lanczos до размера кадра; 1 = быстрый превью)
 //   Размер кадра — TIMELINE.frame = { w, h } (чётные px), по умолчанию 720×1280
 //   --preset   пресет x264 (по умолчанию slow)
-//   FRAMES_DIR каталог для PNG-кадров (по умолчанию .frames рядом со скриптом; после рендера можно удалить — это гигабайты)
+//   FRAMES_DIR каталог для PNG (--stills, --keep-frames; по умолчанию .frames рядом со скриптом)
 //   CHROME_PATH путь к Chrome/Chromium, если Google Chrome не установлен в стандартное место
 import puppeteer from 'puppeteer-core';
 import { spawn, spawnSync } from 'node:child_process';
@@ -57,12 +58,16 @@ if (!existsSync(path.join(epDir, 'timeline.js'))) {
 
 // ── инструменты и каталоги ──
 if (!stills && spawnSync('ffmpeg', ['-version']).error) fail('ffmpeg не найден в PATH (brew install ffmpeg)');
-if (existsSync(framesDir)) { // чистим только если там лежат наши PNG (защита от FRAMES_DIR=~)
-  const foreign = readdirSync(framesDir).filter(f => !/^(f_\d+|still_[\d.]+)\.png$/.test(f) && f !== '.DS_Store');
-  if (foreign.length) fail(`FRAMES_DIR ${framesDir} содержит посторонние файлы (${foreign.slice(0, 3).join(', ')}) — не чищу`);
-  rmSync(framesDir, { recursive: true, force: true });
+// PNG на диск — только стиллы и --keep-frames; видео идёт в ffmpeg через stdin
+const WRITE_FRAMES = !!stills || KEEP_FRAMES;
+if (WRITE_FRAMES) {
+  if (existsSync(framesDir)) { // чистим только если там лежат наши PNG (защита от FRAMES_DIR=~)
+    const foreign = readdirSync(framesDir).filter(f => !/^(f_\d+|still_[\d.]+)\.png$/.test(f) && f !== '.DS_Store');
+    if (foreign.length) fail(`FRAMES_DIR ${framesDir} содержит посторонние файлы (${foreign.slice(0, 3).join(', ')}) — не чищу`);
+    rmSync(framesDir, { recursive: true, force: true });
+  }
+  mkdirSync(framesDir, { recursive: true });
 }
-mkdirSync(framesDir, { recursive: true });
 mkdirSync(path.dirname(out), { recursive: true });
 
 // ── озвучка: собираем ДО съёмки, чтобы voice.js (субтитры, окна рта) был свежим. API зовётся только для новых реплик ──
@@ -81,7 +86,14 @@ if (!VOICE_ON && hasVoice && !existsSync(voiceJs)) {
 // байт-в-байт то же PNG, что у page.screenshot(), но без его накладных расходов (~2.4× быстрее).
 const browsers = [];
 let FRAME = null;   // { w, h } — размер кадра эпизода (FRAME в src/render.js); узнаём у первой страницы
-const die = async msg => { await Promise.all(browsers.map(b => b.close().catch(() => {}))); fail(msg); };
+let enc = null;     // ffmpeg-энкодер видео (читает PNG из stdin)
+const videoTmp = out.replace(/\.mp4$/, '.video-tmp.mp4');   // энкодер пишет сюда; в out — только целиком собранное видео
+// первая причина побеждает: остальные ошибки — следствия (закрытый Chrome, оборванный pipe)
+let dying = null;
+const die = msg => dying ??= (async () => {
+  if (enc) { enc.kill('SIGKILL'); rmSync(videoTmp, { force: true }); }
+  await Promise.all(browsers.map(b => b.close().catch(() => {}))); fail(msg);
+})();
 // voice=0: voice.js ещё не собран — index.html не должен пытаться его грузить (несуществующий script на file:// = ошибка страницы)
 const pageUrl = pathToFileURL(path.join(dir, 'index.html')).href + `?ep=${encodeURIComponent(ep)}` + (existsSync(voiceJs) ? '' : '&voice=0');
 async function openPage() {
@@ -112,8 +124,8 @@ async function openPage() {
   const cdp = await page.createCDPSession();
   return { page, cdp, errors };
 }
-const shoot = (cdp, file) => cdp.send('Page.captureScreenshot', { format: 'png', optimizeForSpeed: true, clip: { x: 0, y: 0, width: FRAME.w, height: FRAME.h, scale: DSF } })
-  .then(r => writeFile(file, Buffer.from(r.data, 'base64')));
+const capture = cdp => cdp.send('Page.captureScreenshot', { format: 'png', optimizeForSpeed: true, clip: { x: 0, y: 0, width: FRAME.w, height: FRAME.h, scale: DSF } })
+  .then(r => Buffer.from(r.data, 'base64'));
 
 const first = await openPage();
 const duration = await first.page.evaluate(() => typeof TIMELINE === 'object' && TIMELINE.duration);
@@ -125,32 +137,64 @@ const nameOf = i => stills ? `still_${times[i].toFixed(2)}.png` : `f_${String(i)
 const jobs = Math.min(JOBS, times.length);
 const pages = [first, ...await Promise.all(Array.from({ length: jobs - 1 }, openPage))];
 
-// кадр — чистая функция t, поэтому процессы делят кадры по модулю без общего состояния
+// ── видео: PNG-кадры идут в ffmpeg через stdin (image2pipe) — на диске только mp4 ──
+const run = (cmd, a) => new Promise((res, rej) => spawn(cmd, a, { stdio: 'inherit' })
+  .on('error', e => rej(new Error(`${cmd}: ${e.message}`)))
+  .on('exit', c => c ? rej(new Error(`${cmd} завершился с кодом ${c}`)) : res()));
+let encEnding = false;
+if (!stills) {
+  enc = spawn('ffmpeg', ['-y', '-v', 'error', '-f', 'image2pipe', '-framerate', String(FPS), '-c:v', 'png', '-i', 'pipe:0',
+    '-vf', `scale=${FRAME.w}:${FRAME.h}:flags=lanczos`, '-c:v', 'libx264', '-preset', PRESET, '-crf', '17', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', videoTmp],
+    { stdio: ['pipe', 'inherit', 'inherit'] });
+  enc.exited = new Promise(res => enc.on('exit', (code, sig) => res(code ?? sig)));
+  enc.on('error', e => die(`ffmpeg: ${e.message}`));
+  enc.stdin.on('error', () => {});   // EPIPE, если ffmpeg упал: причину сообщит обработчик выхода ниже
+  enc.exited.then(c => { if (!encEnding) die(`ffmpeg завершился посреди съёмки (код ${c})`); });
+}
+
+// Кадр — чистая функция t: процессы Chrome берут кадры из общей очереди и снимают параллельно, т.е. не по порядку.
+// Буфер переупорядочивания: снятый кадр i ждёт в pending, пока в ffmpeg не ушли все кадры до него.
+// Окно WINDOW ограничивает забег вперёд (память ≈ WINDOW PNG-кадров); медленный ffmpeg тормозит съёмку через drain.
+const WINDOW = Math.max(8, jobs * 3);
+const pending = new Map(), waiters = [];
+let claimed = 0, written = 0, done = 0, writeChain = Promise.resolve();
+async function flush() {
+  while (pending.has(written)) {
+    const png = pending.get(written); pending.delete(written); written++;
+    waiters.splice(0).forEach(wake => wake());
+    if (!enc.stdin.write(png)) await Promise.race([new Promise(r => enc.stdin.once('drain', r)), enc.exited]);
+  }
+}
 const t0 = Date.now();
-let done = 0;
 try {
-  await Promise.all(pages.map(async ({ page, cdp, errors }, k) => {
-    for (let i = k; i < times.length; i += jobs) {
+  await Promise.all(pages.map(async ({ page, cdp, errors }) => {
+    for (;;) {
+      while (enc && claimed < times.length && claimed - written >= WINDOW) await new Promise(r => waiters.push(r));
+      if (claimed >= times.length) return;
+      const i = claimed++;
       await page.evaluate(t => render(t), times[i]);
       if (errors.length) throw new Error(`t=${times[i]}: ${errors.join('; ')}`);
-      await shoot(cdp, path.join(framesDir, nameOf(i)));
+      const png = await capture(cdp);
+      if (WRITE_FRAMES) await writeFile(path.join(framesDir, nameOf(i)), png);
+      if (enc) { pending.set(i, png); writeChain = writeChain.then(flush); }
       if (++done % 30 === 0) process.stdout.write(`\r${done}/${times.length}`);
     }
   }));
 } catch (e) { await die(e.message); }
 await Promise.all(browsers.map(b => b.close()));
-console.log(`\rcaptured ${times.length} frames ${FRAME.w}×${FRAME.h} in ${((Date.now() - t0) / 1000).toFixed(1)}s (${jobs} jobs, dsf ${DSF}) → ${framesDir}`);
-
-const run = (cmd, a) => new Promise((res, rej) => spawn(cmd, a, { stdio: 'inherit' })
-  .on('error', e => rej(new Error(`${cmd}: ${e.message}`)))
-  .on('exit', c => c ? rej(new Error(`${cmd} завершился с кодом ${c}`)) : res()));
+const secs = ms => ((Date.now() - ms) / 1000).toFixed(1);
+console.log(`\rcaptured ${times.length} frames ${FRAME.w}×${FRAME.h} in ${secs(t0)}s (${jobs} jobs, dsf ${DSF})` +
+  (WRITE_FRAMES ? ` → ${framesDir}` : ' → ffmpeg pipe'));
 
 if (!stills) {
   const t1 = Date.now();
-  await run('ffmpeg', ['-y', '-v', 'error', '-framerate', String(FPS), '-i', path.join(framesDir, 'f_%04d.png'),
-    '-vf', `scale=${FRAME.w}:${FRAME.h}:flags=lanczos`, '-c:v', 'libx264', '-preset', PRESET, '-crf', '17', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', out])
-    .catch(e => fail(e.message));
-  console.log(`→ ${out} (encode ${((Date.now() - t1) / 1000).toFixed(1)}s)`);
+  await writeChain;
+  encEnding = true;
+  enc.stdin.end();
+  const code = await enc.exited;
+  if (code !== 0) { rmSync(videoTmp, { force: true }); fail(`ffmpeg завершился с кодом ${code}`); }
+  renameSync(videoTmp, out);
+  console.log(`→ ${out} (encode tail ${secs(t1)}s, total ${secs(t0)}s)`);
 
   if (SFX_ON || VOICE_ON) { // звук: фоли (sfx/build.mjs → out/<name>.sfx.wav) и/или озвучка (voice/mix.wav) → AAC
     const wav = out.replace(/\.mp4$/, '.sfx.wav'), tmpOut = out.replace(/\.mp4$/, '.sfx-tmp.mp4');
@@ -171,7 +215,5 @@ if (!stills) {
     renameSync(tmpOut, out);
     console.log(`→ + ${[SFX_ON && 'sfx', VOICE_ON && 'voice'].filter(Boolean).join(' + ')}`, out);
   }
-  // PNG-кадры больше не нужны (и весят гигабайты) — удаляем, если не просили оставить
   if (KEEP_FRAMES) console.log(`кадры оставлены: ${framesDir} (--keep-frames)`);
-  else { rmSync(framesDir, { recursive: true, force: true }); console.log(`кадры удалены: ${framesDir} (оставить — --keep-frames)`); }
 }

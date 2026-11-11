@@ -35,7 +35,7 @@ On first use the skill deploys the engine (the «studio») to `~/cartoon-studio`
 
 - Node.js ≥ 18, ffmpeg
 - Google Chrome — or set `CHROME_PATH=/path/to/chromium` (Linux/CI)
-- ~10 GB of free disk space while rendering an 80 s reel: frames are written as PNG, then deleted
+- Disk space only for the output mp4: frames are piped straight into ffmpeg (`--keep-frames` also writes them as PNG for debugging)
 - macOS + iCloud: don't put the studio inside a synced «Documents» folder unless the folder name ends with `.nosync`. When the disk fills up, macOS evicts the sources to the cloud and renders fail with strange errors.
 
 ### Voice-over: you need ONE key — Fish Audio **or** OpenRouter

@@ -6,3 +6,4 @@ sfx/.tmp/
 episodes/*/voice/mix.wav
 .lineup.html
 .DS_Store
+episodes/*-long/

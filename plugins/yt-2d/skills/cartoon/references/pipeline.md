@@ -28,7 +28,7 @@ cartoon-studio/
 ├─ .env                     OPENROUTER_API_KEY=… или FISH_AUDIO_API_KEY=… (только локально; в шаблон и git не попадает; образец — .env.example)
 ├─ fonts/                   локальные woff2 (Rubik 700/800/900, Pangolin, JetBrains Mono) + fonts.css
 ├─ out/                     <ep>.mp4, <ep>.sfx.wav (артефакты)
-└─ .frames/                 PNG-кадры последнего рендера (перезаписываются; FRAMES_DIR переопределяет)
+└─ .frames/                 PNG стиллов / --keep-frames (перезаписываются; FRAMES_DIR переопределяет)
 ```
 
 Порядок загрузки в index.html (важно, скрипты классические, через `document.write`):
@@ -145,7 +145,7 @@ node render.mjs --ep <ep> --sfx --final              # → out/<ep>.mp4 (+ out/<
 node render.mjs --ep <ep> out/<ep>_v2.mp4 --sfx      # явное имя (версии — руками, старые не перезаписывать)
 ```
 Только звук, без видео: `node sfx/build.mjs --ep <ep> [--out x.wav] [--dump] [--keep]`.
-Флаги render.mjs: `--preview` / `--final`, `--keep-frames` (после сборки mp4 PNG-кадры удаляются автоматически — 80 с ролика ≈ 10 ГБ; `--stills` не трогает), `--jobs N` (процессы Chrome, по умолчанию 4), `--dsf N`, `--preset` (x264), `FRAMES_DIR=…`.
+Флаги render.mjs: `--preview` / `--final`, `--keep-frames` (видео идёт в ffmpeg через pipe без PNG на диске; флаг дополнительно пишет кадры в `FRAMES_DIR` для отладки), `--jobs N` (процессы Chrome, по умолчанию 4), `--dsf N`, `--preset` (x264), `FRAMES_DIR=…`.
 
 ### 2.8 Сдача
 - Проверить ffprobe и просмотреть mp4 (раздел 6).
@@ -330,7 +330,7 @@ node new-episode.mjs <ep> --preset garage3                               # ст�
 FRAMES_DIR=/tmp/rv node render.mjs --ep <ep> --stills 0.5,2.1            # стиллы (voice.js соберётся сам без API)
 node render.mjs --ep <ep> /tmp/p.mp4 --preview                           # превью (= --dsf 1 --preset veryfast)
 ffmpeg -v error -i /tmp/p.mp4 -vf "select=not(mod(n\,10)),scale=180:-1,tile=6x4" -frames:v 1 -y /tmp/contact.png
-node render.mjs --ep <ep> --sfx --final                                  # финал → out/<ep>.mp4 (кадры .frames удаляются; --keep-frames — оставить)
+node render.mjs --ep <ep> --sfx --final                                  # финал → out/<ep>.mp4 (кадры на диск не пишутся; --keep-frames — сохранить PNG)
 node sfx/build.mjs --ep <ep> --dump                                      # таблица ударов фоли
 node --env-file=.env voice/build.mjs --ep <ep> --check                   # озвучка: TTS новых реплик + проверка STT → voice.js, voice/mix.wav
 node --env-file=.env render.mjs --ep <ep> out/<ep>_vN.mp4 --voice --sfx  # финал с озвучкой (фоли приглушены под речью)
@@ -367,4 +367,4 @@ ffprobe -v error -show_entries stream=codec_name,width,height,r_frame_rate,nb_fr
 - Параллельные скриншоты вкладок ОДНОГО Chrome в headless виснут навсегда — поэтому `--jobs` = отдельные процессы Chrome; не «оптимизировать» обратно.
 - ±1 LSB-шум в ~3–5 % кадров между двумя прогонами (растеризация градиентов в Chrome, PSNR > 57 dB): норма, после x264 CRF 17 неотличимо. Байт-идентичность стиллов для регрессии проверять на 4–6 фиксированных t (они стабильны), не на всех 240 кадрах.
 - Ленивые шрифты: первый кадр с текстом мог уйти с fallback-шрифтом; render.mjs теперь грузит все `document.fonts` до съёмки — при добавлении нового шрифта просто дописать `@font-face` в fonts/fonts.css.
-- Длинный ролик (>30 с) при DSF 2: ~1.5 МБ на кадр PNG → 900 кадров ≈ 1.4 ГБ в `.frames` — ставить `FRAMES_DIR` на диск с местом или рендерить с `--dsf 1` для превью.
+- Длинный ролик с `--keep-frames`: PNG-кадр 720×1280 ≈ 1.4 МБ при DSF 1 (1080p — ×2.25, DSF 2 — ×4) — ставить `FRAMES_DIR` на диск с местом. Без флага кадры на диск не пишутся.
