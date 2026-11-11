@@ -1,0 +1,21 @@
+{
+ "model": "fish-audio/drama-3",
+ "voice": "536d3a5e000945adb7038665781a4aca",
+ "text": "Same garage, different angle.",
+ "v": 3,
+ "dur": 2.717,
+ "speech": [
+  [
+   0.132,
+   1.103
+  ],
+  [
+   1.511,
+   2.186
+  ]
+ ],
+ "breath": [],
+ "lufs": -22.8,
+ "gain": 6.8,
+ "transcript": "Same garage, different angle."
+}

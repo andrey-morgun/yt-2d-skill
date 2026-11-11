@@ -12,6 +12,9 @@
 //   Без ключа (или с --no-api) API не зовётся: реплики из кэша как обычно, а для некэшированных строится ЗАГЛУШКА —
 //   длительность по слогам, субтитры и окна рта по оценке, аудио нет (в стем не идёт, в кэш ничего не пишется).
 //   Так стиллы и превью нового эпизода работают без ключа; появился ключ — пересобери, сгенерируются только недостающие.
+//   Язык эпизода — TIMELINE.lang ('ru' по умолчанию | 'en' | …): язык STT в --check и счёт слогов для таймингов слов.
+//   Субтитры: фраза ≤ subMax.words слов и ≤ subMax.chars символов (TIMELINE.subMax); по умолчанию — от ширины кадра:
+//   chars = min(42, 24·w/720) (720 → 24, 1920 → 42), words = max(3, chars/7) (720 → 3, 1920 → 6).
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, existsSync, readFileSync, writeFileSync, renameSync, rmSync } from 'node:fs';
@@ -26,7 +29,7 @@ const ep = opt('--ep', 'tolyan'), epDir = path.join(root, 'episodes', ep), cache
 const MODEL = opt('--model', 'fish-audio/drama-3'), CHECK = argv.includes('--check'), NO_API = argv.includes('--no-api') || process.env.VOICE_NO_API === '1';
 const HAS_KEY = !!(process.env.OPENROUTER_API_KEY || process.env.FISH_AUDIO_API_KEY);
 const SR = 48000, TARGET_LUFS = -16, CEILING = 0.891;      // стем: −16 LUFS интегрально по клипу, пик ≤ −1 dBFS
-const SUB_WORDS = 3, SUB_CHARS = 24, SUB_HOLD = 0.45;        // фраза субтитра: ≤3 слова, ≤24 символа; держать после последнего слова
+const SUB_HOLD = 0.45;                                      // держать фразу субтитра после последнего слова, с
 const BREATH_DB = 12, META_V = 3;                           // речевой участок тише самого громкого на 12+ dB = вздох; версия анализа в <hash>.json
 const warn = m => console.warn('voice: ' + m);
 
@@ -38,6 +41,11 @@ function loadTimeline(file) {
 }
 const TL = loadTimeline(path.join(epDir, 'timeline.js'));
 const V = TL.voice;
+const LANG = TL.lang ?? 'ru';
+if (!/^[a-z]{2}$/.test(LANG)) throw new Error(`TIMELINE.lang: двухбуквенный код языка ('ru', 'en'), получено ${JSON.stringify(LANG)}`);
+// длина строки субтитра — от ширины кадра (720 px → 24 символа, как в вертикальных рилсах); TIMELINE.subMax перекрывает
+const SUB_CHARS = TL.subMax?.chars ?? Math.min(42, Math.floor(24 * ((TL.frame && TL.frame.w) || 720) / 720));
+const SUB_WORDS = TL.subMax?.words ?? Math.max(3, Math.floor(SUB_CHARS / 7));
 if (!V || !Array.isArray(V.lines) || !V.cast) throw new Error(`episodes/${ep}/timeline.js: нет TIMELINE.voice = { cast, lines }`);
 for (const l of V.lines) {
   if (!l.id || !l.who || typeof l.text !== 'string' || !(l.t >= 0)) throw new Error(`реплика без id/who/text/t: ${JSON.stringify(l)}`);
@@ -52,8 +60,19 @@ function ff(args, label) {
   return r.stderr;
 }
 const spoken = text => text.replace(/\[[^\]]*\]/g, ' ').trim().split(/\s+/).filter(Boolean);   // слова без режиссёрских тегов [устало]
-const syllables = w => Math.max(1, (w.toLowerCase().match(/[аеёиоуыэюяaeiouy]/g) || []).length);
-const norm = s => s.toLowerCase().replace(/ё/g, 'е').replace(/[^\p{L}\p{N}\s]/gu, ' ').trim().split(/\s+/).filter(Boolean);
+// слоги: в русском каждая гласная — слог; в английском — группы гласных без немой e на конце (make 1, beautiful 3, the 1)
+const syllables = LANG === 'en'
+  ? w => { const s = w.toLowerCase().replace(/[^a-z]/g, '').replace(/(?:[^laeiouy]es|ed|[^laeiouy]e)$/, '').replace(/^y/, '');
+           return Math.max(1, (s.match(/[aeiouy]{1,2}/g) || []).length); }
+  : w => Math.max(1, (w.toLowerCase().match(/[аеёиоуыэюяaeiouy]/g) || []).length);
+// для --check: числа в английском STT пишет цифрами («Scene 2»), а в тексте реплики — словами; приводим цифры к словам (0…999 999)
+const EN_NUM = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen',
+  'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen'], EN_TENS = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety'];
+const enWords = n => n < 20 ? EN_NUM[n] : n < 100 ? EN_TENS[Math.floor(n / 10)] + (n % 10 ? ' ' + EN_NUM[n % 10] : '')
+  : n < 1000 ? EN_NUM[Math.floor(n / 100)] + ' hundred' + (n % 100 ? ' ' + enWords(n % 100) : '')
+  : enWords(Math.floor(n / 1000)) + ' thousand' + (n % 1000 ? ' ' + enWords(n % 1000) : '');
+const numsToWords = s => LANG !== 'en' ? s : s.replace(/\d{1,3}(?:,\d{3})+|\d+/g, d => { const n = +d.replace(/,/g, ''); return n < 1e6 ? enWords(n) : d; });
+const norm = s => numsToWords(s.toLowerCase().replace(/ё/g, 'е')).replace(/[^\p{L}\p{N}\s]/gu, ' ').trim().split(/\s+/).filter(Boolean);
 const r3 = x => Math.round(x * 1000) / 1000;
 
 const PROVIDER = opt('--provider', process.env.VOICE_PROVIDER || (process.env.OPENROUTER_API_KEY ? 'openrouter' : process.env.FISH_AUDIO_API_KEY ? 'fish' : 'openrouter'));
@@ -194,7 +213,7 @@ if (CHECK) {
     const wav = spawnSync('ffmpeg', ['-hide_banner', '-nostdin', '-v', 'error', '-i', c.mp3, '-ar', '16000', '-ac', '1', '-c:a', 'pcm_s16le', '-f', 'wav', 'pipe:1'], { maxBuffer: 1 << 26 });
     if (wav.status !== 0) throw new Error(`ffmpeg wav для --check: ${wav.stderr}`);
     try {
-      const res = await api('transcriptions', { model: 'openai/gpt-transcribe', input_audio: { data: wav.stdout.toString('base64'), format: 'wav' }, language: 'ru' });
+      const res = await api('transcriptions', { model: 'openai/gpt-transcribe', input_audio: { data: wav.stdout.toString('base64'), format: 'wav' }, language: LANG });
       c.meta.transcript = String((await res.json()).text ?? '');
       writeFileSync(c.json, JSON.stringify(c.meta, null, 1));
     } catch (e) { warn(`${c.line.id}: транскрипция не удалась — ${e.message}`); continue; }

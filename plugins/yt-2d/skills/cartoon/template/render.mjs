@@ -74,11 +74,13 @@ if (WRITE_FRAMES) {
 mkdirSync(path.dirname(out), { recursive: true });
 
 // ── озвучка: собираем ДО съёмки, чтобы voice.js (субтитры, окна рта) был свежим. API зовётся только для новых реплик ──
-const VOICE_ON = args.includes('--voice'), SFX_ON = args.includes('--sfx');
+const hasVoice = (() => { try { return !!runInNewContext(readFileSync(path.join(epDir, 'timeline.js'), 'utf8') + '\n;TIMELINE', {}).voice; } catch { return false; } })();
+// --voice у эпизода без TIMELINE.voice (немая сцена шоу) — пропускаем: звук будет только из фоли / тишина
+if (args.includes('--voice') && !hasVoice) console.log(`render: в episodes/${ep} нет TIMELINE.voice — --voice пропущен`);
+const VOICE_ON = args.includes('--voice') && hasVoice, SFX_ON = args.includes('--sfx');
 const voiceJs = path.join(epDir, 'voice.js'), voiceWav = path.join(epDir, 'voice', 'mix.wav');
 if (VOICE_ON && spawnSync(process.execPath, [path.join(dir, 'voice', 'build.mjs'), '--ep', ep], { stdio: 'inherit' }).status !== 0) fail('voice/build.mjs завершился с ошибкой');
 // без --voice: если эпизод говорит, а voice.js ещё нет — собрать его без API (кэш + заглушки), чтобы стиллы/превью шли с субтитрами
-const hasVoice = (() => { try { return !!runInNewContext(readFileSync(path.join(epDir, 'timeline.js'), 'utf8') + '\n;TIMELINE', {}).voice; } catch { return false; } })();
 if (!VOICE_ON && hasVoice && !existsSync(voiceJs)) {
   console.log(`render: episodes/${ep}/voice.js ещё нет — собираю без API (voice/build.mjs --no-api)`);
   if (spawnSync(process.execPath, [path.join(dir, 'voice', 'build.mjs'), '--ep', ep, '--no-api'], { stdio: 'inherit' }).status !== 0) fail('voice/build.mjs --no-api завершился с ошибкой');

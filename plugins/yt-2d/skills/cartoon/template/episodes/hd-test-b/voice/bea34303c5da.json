@@ -1,0 +1,21 @@
+{
+ "model": "fish-audio/drama-3",
+ "voice": "bf322df2096a46f18c579d0baa36f41d",
+ "text": "[dryly] Scene two. The kettle stays.",
+ "v": 3,
+ "dur": 3.37,
+ "speech": [
+  [
+   0.109,
+   0.931
+  ],
+  [
+   2.039,
+   3.156
+  ]
+ ],
+ "breath": [],
+ "lufs": -21.3,
+ "gain": 5.3,
+ "transcript": "Scene 2. The kettle stays."
+}
