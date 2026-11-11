@@ -50,6 +50,8 @@ function charState(t, shot, who) {
     const rig = (CHARS[who] && CHARS[who].rig) || {};
     const poses = resolvePoses(C.poses, who);   // ключи { t, pose:'fingerUp', … } → wrist/hand/… (src/presets.js); без пресетов — тот же объект
     const arms = rigArms(poses, t, bob, rig);
+    // ноги — только если эпизод задал стойку (poses.legs) и у персонажа есть rig.legs; иначе персонаж как раньше (по пояс)
+    const legs = C.poses && C.poses.legs ? rigLegs(resolveLegs(C.poses.legs, who), t, rig) : null;
     const holds = name => Object.values(arms).some(a => a.prop === name);
     // спичка Толяна: падает в начале окна matchDrop (по умолчанию — каждого шока), возвращается в ключах matchBack
     const drops = (E.matchDrop || windows(E.shock).map(w => w[0])).filter(d => d <= t), backs = (E.matchBack || []).filter(b => b <= t);
@@ -64,6 +66,7 @@ function charState(t, shot, who) {
       tilt: rigHead(poses && poses.head, t), arms,
     };
     for (const k in tr) if (!(k in st)) st[k] = tr[k];   // свои поля (glasses, gaze, …); lid/look/glow/squint уже учтены выше
+    if (legs) st.legs = legs;   // { hipDy, L, R, rig } — stage.js рисует ноги и сдвигает корпус на hipDy
     return st;
   }
 

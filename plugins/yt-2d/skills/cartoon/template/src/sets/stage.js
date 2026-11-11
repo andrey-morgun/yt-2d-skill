@@ -25,10 +25,10 @@ function stagePlacement(m) {
   return { x, y, s, sx, transform: `translate(${x},${y}) translate(360,1280) scale(${sx},${s}) translate(-360,-1280)`,
     toWorld: ([lx, ly]) => [x + 360 + sx * (lx - 360), y + 1280 + s * (ly - 1280)] };
 }
-// точка головы (локальная, до наклона) → мир: наклон tilt вокруг шеи (360,700), затем размещение
+// точка головы (локальная, до наклона) → мир: наклон tilt вокруг шеи (360,700), сдвиг бёдер hipDy (ноги), затем размещение
 function stageHeadPoint(pl, st, [px, py]) {
-  const a = (st.tilt || 0) * Math.PI / 180, dx = px - 360, dy = py - 700;
-  return pl.toWorld([360 + dx * Math.cos(a) - dy * Math.sin(a), 700 + dx * Math.sin(a) + dy * Math.cos(a)]);
+  const a = (st.tilt || 0) * Math.PI / 180, dx = px - 360, dy = py - 700, hy = st.legs ? st.legs.hipDy : 0;
+  return pl.toWorld([360 + dx * Math.cos(a) - dy * Math.sin(a), 700 + dx * Math.sin(a) + dy * Math.cos(a) + hy]);
 }
 const stageFn = (name, what) => {
   if (!name) return null;
@@ -48,9 +48,11 @@ function stageDraw(t, shot) {
   });
   const env = stageEnv(t, members);
   const back = stageFn(shot.back ?? SG.back, 'back'), front = stageFn(shot.front ?? SG.front, 'front');
+  // с ногами (st.legs): ноги — до торса, а торс, руки и голова сдвинуты на hipDy (сел — опустились вместе с бёдрами)
+  const hip = (st, inner) => st.legs ? `<g transform="translate(0,${st.legs.hipDy.toFixed(1)})">${inner}</g>` : inner;
   const behind = members.map(({ ch, st, pl, P }) =>
-    `<g transform="${pl.transform}">${ch.body(st, P)}${armsSvg(st.arms, 'behind', st, t, env)}<g transform="rotate(${(st.tilt || 0).toFixed(2)} 360 700)">${ch.head(st, P)}</g></g>`).join('');
-  const fore = members.map(({ st, pl }) => { const a = armsSvg(st.arms, 'front', st, t, env); return a ? `<g transform="${pl.transform}">${a}</g>` : ''; }).join('');
+    `<g transform="${pl.transform}">${st.legs ? legsSvg(st.legs) : ''}${hip(st, `${ch.body(st, P)}${armsSvg(st.arms, 'behind', st, t, env)}<g transform="rotate(${(st.tilt || 0).toFixed(2)} 360 700)">${ch.head(st, P)}</g>`)}</g>`).join('');
+  const fore = members.map(({ st, pl }) => { const a = armsSvg(st.arms, 'front', st, t, env); return a ? `<g transform="${pl.transform}">${hip(st, a)}</g>` : ''; }).join('');
   let scene = (back ? back(t, env) : '') + behind + (front ? front(t, env) : '') + fore;
 
   if (shot.mode === 'blackout') {

@@ -210,3 +210,58 @@ function armsSvg(arms, layer, st, t, env) {
   }
   return s;
 }
+
+// ─── ноги: бедро → колено → лодыжка + стопа (этап 2) ───────────────────────
+// Риг ног — необязательный блок CHARS.<who>.rig.legs = { L:{ hip:[x,y], len:[бедро, голень], bend }, R:{…},
+//   width, trouser, shoe, ankle }. Нет блока — ног нет (персонажи за столом рисуются как раньше).
+// Пол — локальный y = FLOOR: стоя подошвы на полу; размещение масштабирует вокруг (360, FLOOR) → ноги не отрываются от пола.
+// Ключи стойки — TIMELINE.cast[who].poses.legs: [{ t, pose:'stand' | …, dur? }] (пресеты — LEG_POSES в presets.js) раскрываются в
+//   { t, dur?, hipDy, L:{ ankle:[x,y], knee?:[x,y], bend?, footAng? }, R:{…} }
+//   hipDy — сдвиг бёдер по y (+ вниз): вместе с бёдрами едут торс, руки и голова (stage.js); knee — явное колено вместо IK.
+// Переход между ключами — easeInOut без перелёта (snap рук перелетает, и стопа ушла бы под пол).
+// Колено без явного knee: анфас (turn 0) колено гнётся К КАМЕРЕ — в проекции нога прямая (лежит на линии бедро→лодыжка,
+// просто короче); в профиль (|turn| 1) изгиб виден сбоку — IK с изгибом вперёд по ходу взгляда. Между ними — смесь по |turn|.
+const FLOOR = 1280;
+const LEG_DEFAULTS = { width: 54, trouser: '#5d5a55', shoe: '#3a3632', ankle: 18 };
+function legsRigOf(rig) {
+  const L = rig && rig.legs;
+  return L ? { ...LEG_DEFAULTS, ...L } : null;
+}
+function kneeAuto(hip, ankle, cfg, turn, bend) {
+  const r = cfg.len[0] / (cfg.len[0] + cfg.len[1]), front = [lerp(hip[0], ankle[0], r), lerp(hip[1], ankle[1], r)];
+  if (!turn) return front;
+  const side = ik(hip, ankle, cfg.len, bend ?? (turn > 0 ? -1 : 1)).elbow, k = Math.min(1, Math.abs(turn));
+  return [lerp(front[0], side[0], k), lerp(front[1], side[1], k)];
+}
+function rigLegs(keys, t, rig, turn = 0) {
+  const LR = legsRigOf(rig);
+  if (!LR || !keys || !keys.length) return null;
+  const { a, b, k } = keyAt(keys, t, (rig && rig.dur) ?? RIG.dur), e = easeInOut(k);
+  const hA = a.hipDy ?? 0, hB = b.hipDy ?? 0, hipDy = lerp(hA, hB, e);
+  const out = { hipDy, rig: LR };
+  for (const side of ['L', 'R']) {
+    const cfg = LR[side], A = a[side], B = b[side];
+    const kneeOf = (K, hy) => K.knee || kneeAuto([cfg.hip[0], cfg.hip[1] + hy], K.ankle, cfg, turn, K.bend);
+    const kA = kneeOf(A, hA), kB = kneeOf(B, hB);
+    out[side] = {
+      hip: [cfg.hip[0], cfg.hip[1] + hipDy],
+      knee: [lerp(kA[0], kB[0], e), lerp(kA[1], kB[1], e)],
+      ankle: [lerp(A.ankle[0], B.ankle[0], e), lerp(A.ankle[1], B.ankle[1], e)],
+      footAng: lerp(A.footAng ?? 0, B.footAng ?? 0, e),
+    };
+  }
+  return out;
+}
+// стопа анфас: ботинок-овал под лодыжкой, носок чуть наружу; footAng — наклон стопы (°), положительный — носок вниз
+function footSvg(l, side, R) {
+  const out = side === 'L' ? -1 : 1, [x, y] = l.ankle;
+  return `<g transform="translate(${x.toFixed(1)},${y.toFixed(1)}) rotate(${(out * (l.footAng || 0)).toFixed(1)})">
+    <ellipse cx="${out * 6}" cy="${R.ankle * .2}" rx="31" ry="${R.ankle * .8}" fill="${R.shoe}" stroke="${S}" stroke-width="${W}"/>
+    <path d="M${out * 6 - 16},${R.ankle * .2 - 6} q16,-7 32,0" stroke="#fff" stroke-width="3" fill="none" opacity=".25" stroke-linecap="round"/></g>`;
+}
+// обе ноги (рисуются ДО торса: верх бедра прячется под низом корпуса)
+function legsSvg(g) {
+  if (!g) return '';
+  const R = g.rig, p = q => [+q[0].toFixed(1), +q[1].toFixed(1)];
+  return ['L', 'R'].map(side => { const l = g[side]; return tube([l.hip, l.knee, l.ankle].map(p), R.width, R.trouser) + footSvg(l, side, R); }).join('');
+}

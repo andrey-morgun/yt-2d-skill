@@ -149,6 +149,8 @@ const POSES = {
   phoneDown:  ({ sh, A }) => ({ wrist: [sh[0] + 58, A.desk + 28], hand: 'phone', rot: 40, layer: 'front', bend: 1, prop: 'phone', bob: 0, dur: .4 }),
   point:    ctx => aimPose(ctx, 'point', 0, 1),
   reach:    ctx => ({ ...aimPose(ctx, 'kiss', 0, .8), dur: .3 }),
+  // руки вдоль тела — стоящий персонаж (полный рост); кисть пальцами вниз, чуть наружу от бедра
+  hang:     ({ sh }) => ({ wrist: [sh[0] - 14, sh[1] + 196], hand: 'rest', rot: 0, layer: 'front', elbow: [sh[0] - 10, sh[1] + 100], arc: 0, bob: .4 }),
 };
 // кисть по направлению на цель: запястье на луче плечо→цель (длина ≈ 2/3 расстояния, 120…175 px), палец вдоль предплечья
 function aimPose(ctx, hand, rot, reach) {
@@ -180,6 +182,31 @@ const HEAD_POSES = {
   shake: t => [{ t, tilt: -4, dur: .12 }, { t: t + .14, tilt: 4, dur: .12 }, { t: t + .28, tilt: 0, dur: .15 }],
   left:  t => [{ t, tilt: -5 }], right: t => [{ t, tilt: 5 }], level: t => [{ t, tilt: 0 }],
 };
+
+// ── стойки ног (TIMELINE.cast[who].poses.legs: [{ t, pose, …переопределения }]) ──
+// Функции получают ctx = { LR (риг ног персонажа, rig.js legsRigOf), k } и возвращают { hipDy, L:{ ankle, knee?, … }, R:{…} }.
+const LEG_POSES = {
+  // стоя: стопы под бёдрами чуть шире, подошвы на полу
+  stand: ({ LR }) => ({ hipDy: 0,
+    L: { ankle: [LR.L.hip[0] - 4, FLOOR - LR.ankle] },
+    R: { ankle: [LR.R.hip[0] + 4, FLOOR - LR.ankle] } }),
+};
+const _legs = new WeakMap();
+function resolveLegs(keys, who) {
+  if (!keys) return null;
+  if (_legs.has(keys)) return _legs.get(keys);
+  const LR = legsRigOf(CHARS[who] && CHARS[who].rig);
+  if (!LR) throw new Error(`poses.legs у ${who}: у персонажа нет рига ног (CHARS.${who}.rig.legs)`);
+  const out = keys.map(k => {
+    if (!k.pose) return k;
+    const fn = LEG_POSES[k.pose];
+    if (!fn) throw new Error(`стойка "${k.pose}" у ${who}: неизвестный пресет (есть: ${Object.keys(LEG_POSES).join(', ')})`);
+    const { pose, ...rest } = k, p = fn({ LR, k });
+    return { ...p, ...rest, L: { ...p.L, ...(rest.L || {}) }, R: { ...p.R, ...(rest.R || {}) } };
+  });
+  _legs.set(keys, out);
+  return out;
+}
 
 const mirrorKey = p => {
   const m = { ...p };
