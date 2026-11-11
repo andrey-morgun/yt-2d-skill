@@ -1,0 +1,3 @@
+# LF everywhere: repo is worked on from WSL on /mnt/c with core.autocrlf=true globally;
+# CRLF in the working tree breaks bash scripts (bootstrap.sh etc.).
+* text=auto eol=lf
