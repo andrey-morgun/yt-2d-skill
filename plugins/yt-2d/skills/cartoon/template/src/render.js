@@ -50,8 +50,22 @@ function charState(t, shot, who) {
     const rig = (CHARS[who] && CHARS[who].rig) || {};
     const poses = resolvePoses(C.poses, who);   // ключи { t, pose:'fingerUp', … } → wrist/hand/… (src/presets.js); без пресетов — тот же объект
     const arms = rigArms(poses, t, bob, rig);
-    // ноги — только если эпизод задал стойку (poses.legs) и у персонажа есть rig.legs; иначе персонаж как раньше (по пояс)
-    const legs = C.poses && C.poses.legs ? rigLegs(resolveLegs(C.poses.legs, who), t, rig) : null;
+    // ноги — только если эпизод задал стойку (poses.legs) или путь (path) и у персонажа есть rig.legs; иначе как раньше (по пояс)
+    const turn = tr.turn ?? 0;
+    const legKeys = C.poses && C.poses.legs ? resolveLegs(C.poses.legs, who) : (C.path && legsRigOf(rig) ? resolveLegs(STAND_KEYS, who) : null);
+    let legs = legKeys ? rigLegs(legKeys, t, rig, turn) : null;
+    // ходьба: путь (src/path.js) → фаза шага от пройденного пути в локальных px (мировой путь / масштаб размещения);
+    // стойка смешивается с циклом шага по vRel (разгон/торможение), руки с swing машут в противофазе ногам
+    const P = C.path ? pathAt(C.path, t) : null;
+    if (legs && P && P.vRel > 0) {
+      const stride = C.stride ?? (rig.legs && rig.legs.stride) ?? WALK_STRIDE;
+      const walk = { phase: P.dist / Math.abs(placementOf(who, shot.cast).s) / stride, dir: P.dir, vRel: P.vRel, stride };
+      legs = mixLegs(legs, walkLegs(rig, walk, turn), P.vRel);
+      for (const a of Object.values(arms)) if (a.swing) {   // мах вдоль хода (экранная x), как и шаг
+        const dx = (a.side === 'L' ? -1 : 1) * 46 * P.vRel * a.swing * Math.cos(2 * Math.PI * walk.phase) * walk.dir;
+        a.wrist = [a.wrist[0] + dx, a.wrist[1]]; a.elbow = [a.elbow[0] + dx * .45, a.elbow[1]];
+      }
+    }
     const holds = name => Object.values(arms).some(a => a.prop === name);
     // спичка Толяна: падает в начале окна matchDrop (по умолчанию — каждого шока), возвращается в ключах matchBack
     const drops = (E.matchDrop || windows(E.shock).map(w => w[0])).filter(d => d <= t), backs = (E.matchBack || []).filter(b => b <= t);

@@ -90,7 +90,8 @@ function armState(side, keys, t, bob, rig) {
   const propRot = same ? lerp(a.propRot ?? 0, b.propRot ?? 0, ee) : (mid.propRot ?? 0);
   const [oA, oB] = field(a, b, 'propOffset', [0, 0]);
   const propOffset = same ? [lerp(oA[0], oB[0], ee), lerp(oA[1], oB[1], ee)] : (mid.propOffset ?? [0, 0]);
-  return { side, shoulder: S0, elbow, wrist, rot, hand: mid.hand ?? 'rest', layer, prop, propRot, propOffset, rig: R };
+  // swing — доля маха руки при ходьбе (поза hang: 1), render.js добавляет мах в противофазе ногам
+  return { side, shoulder: S0, elbow, wrist, rot, hand: mid.hand ?? 'rest', layer, prop, propRot, propOffset, rig: R, swing: lerp(a.swing ?? 0, b.swing ?? 0, ee) };
 }
 
 // обе руки из poses = { L:[...], R:[...], head:[...] } (TIMELINE.poses или TIMELINE.cast[who].poses); rig — риг персонажа
@@ -229,6 +230,8 @@ function legsRigOf(rig) {
   const L = rig && rig.legs;
   return L ? { ...LEG_DEFAULTS, ...L } : null;
 }
+// поворот корпуса turn (−1…1, + — лицом вправо по экрану): бёдра сходятся к оси (в профиль почти друг за другом)
+const legHipX = (cfg, turn) => 360 + (cfg.hip[0] - 360) * (1 - .8 * Math.min(1, Math.abs(turn)));
 function kneeAuto(hip, ankle, cfg, turn, bend) {
   const r = cfg.len[0] / (cfg.len[0] + cfg.len[1]), front = [lerp(hip[0], ankle[0], r), lerp(hip[1], ankle[1], r)];
   if (!turn) return front;
@@ -241,13 +244,13 @@ function rigLegs(keys, t, rig, turn = 0) {
   const { a, b, k } = keyAt(keys, t, (rig && rig.dur) ?? RIG.dur), e = easeInOut(k);
   const ctx = { turn }, ev = v => typeof v === 'function' ? v(ctx) : v;
   const hA = ev(a.hipDy) ?? 0, hB = ev(b.hipDy) ?? 0, hipDy = lerp(hA, hB, e);
-  const out = { hipDy, layer: (k >= .5 ? b : a).layer ?? 'behind', rig: LR };
+  const out = { hipDy, layer: (k >= .5 ? b : a).layer ?? 'behind', turn, rig: LR };
   for (const side of ['L', 'R']) {
-    const cfg = LR[side], A = ev(a[side]), B = ev(b[side]);
-    const kneeOf = (K, hy) => K.knee || kneeAuto([cfg.hip[0], cfg.hip[1] + hy], K.ankle, cfg, turn, K.bend);
+    const cfg = LR[side], A = ev(a[side]), B = ev(b[side]), hx = legHipX(cfg, turn);
+    const kneeOf = (K, hy) => K.knee || kneeAuto([hx, cfg.hip[1] + hy], K.ankle, cfg, turn, K.bend);
     const kA = kneeOf(A, hA), kB = kneeOf(B, hB);
     out[side] = {
-      hip: [cfg.hip[0], cfg.hip[1] + hipDy],
+      hip: [hx, cfg.hip[1] + hipDy],
       knee: [lerp(kA[0], kB[0], e), lerp(kA[1], kB[1], e)],
       ankle: [lerp(A.ankle[0], B.ankle[0], e), lerp(A.ankle[1], B.ankle[1], e)],
       footAng: lerp(A.footAng ?? 0, B.footAng ?? 0, e),
@@ -255,16 +258,55 @@ function rigLegs(keys, t, rig, turn = 0) {
   }
   return out;
 }
-// стопа анфас: ботинок-овал под лодыжкой, носок чуть наружу; footAng — наклон стопы (°), положительный — носок вниз
-function footSvg(l, side, R) {
-  const out = side === 'L' ? -1 : 1, [x, y] = l.ankle;
-  return `<g transform="translate(${x.toFixed(1)},${y.toFixed(1)}) rotate(${(out * (l.footAng || 0)).toFixed(1)})">
-    <ellipse cx="${out * 6}" cy="${R.ankle * .2}" rx="31" ry="${R.ankle * .8}" fill="${R.shoe}" stroke="${S}" stroke-width="${W}"/>
-    <path d="M${out * 6 - 16},${R.ankle * .2 - 6} q16,-7 32,0" stroke="#fff" stroke-width="3" fill="none" opacity=".25" stroke-linecap="round"/></g>`;
+// ── ходьба: цикл шага от фазы (фаза = пройденный путь / длина двойного шага, src/path.js) ──
+// Нога в цикле u ∈ [0,1): 60 % — опора (стопа стоит в мире: относительно бедра едет назад ровно со скоростью корпуса),
+// 40 % — перенос вперёд по дуге с подъёмом lift. Правая нога сдвинута на полцикла → двойная опора на стыках.
+// Таз ниже всего в двойной опоре (hipDy + WALK_BOB). Путь идёт вдоль экранной x, поэтому шаг проецируется на x ПОЛНОСТЬЮ при любом
+// повороте (3/4 — условность «идёт поперёк кадра лицом к зрителю»); иначе опорная стопа скользит. w = { phase, dir, vRel, stride }.
+const WALK_DUTY = .6, WALK_BOB = 8, WALK_LIFT = 34;
+function walkLegs(rig, w, turn) {
+  const LR = legsRigOf(rig), S = w.stride, at = Math.min(1, Math.abs(turn)), dir = w.dir || 1;
+  const hipDy = WALK_BOB * (1 - Math.cos(4 * Math.PI * (w.phase - WALK_DUTY / 2))) / 2;
+  const out = { hipDy, layer: 'behind', turn, rig: LR };
+  for (const [side, off] of [['L', 0], ['R', .5]]) {
+    const cfg = LR[side], u = (((w.phase + off) % 1) + 1) % 1;
+    let fwd, lift = 0, ang = 0;
+    if (u < WALK_DUTY) fwd = S * WALK_DUTY / 2 - u * S;
+    else { const q = (u - WALK_DUTY) / (1 - WALK_DUTY), sm = q * q * (3 - 2 * q);
+      fwd = -S * WALK_DUTY / 2 + S * WALK_DUTY * sm; lift = (LR.lift ?? WALK_LIFT) * Math.sin(Math.PI * q); ang = 14 * Math.sin(Math.PI * q); }
+    const hx = legHipX(cfg, turn), hip = [hx, cfg.hip[1] + hipDy];
+    const ankle = [hx + (side === 'L' ? -4 : 4) * (1 - at) + fwd * dir, FLOOR - LR.ankle - lift];
+    out[side] = { hip, knee: kneeAuto(hip, ankle, cfg, turn), ankle, footAng: ang, stance: u < WALK_DUTY };
+  }
+  return out;
 }
-// обе ноги (рисуются ДО торса: верх бедра прячется под низом корпуса)
+// смесь двух состояний ног (стойка → ходьба по vRel)
+function mixLegs(a, b, k) {
+  if (k <= 0) return a;
+  if (k >= 1) return b;
+  const P = (p, q) => [lerp(p[0], q[0], k), lerp(p[1], q[1], k)], out = { ...b, hipDy: lerp(a.hipDy, b.hipDy, k), layer: (k >= .5 ? b : a).layer };
+  for (const s of ['L', 'R']) out[s] = { hip: P(a[s].hip, b[s].hip), knee: P(a[s].knee, b[s].knee), ankle: P(a[s].ankle, b[s].ankle), footAng: lerp(a[s].footAng, b[s].footAng, k), stance: b[s].stance };
+  return out;
+}
+// цвет темнее на долю k (дальние рука/нога при повороте — приём, чтобы конечности не сливались)
+const shade = (hex, k) => '#' + [1, 3, 5].map(i => Math.round(parseInt(hex.slice(i, i + 2), 16) * (1 - k)).toString(16).padStart(2, '0')).join('');
+// стопа: анфас — ботинок-овал под лодыжкой, носок чуть наружу; при повороте носок вытягивается вперёд по ходу взгляда.
+// footAng — наклон стопы (°), положительный — носок вниз (виден только сбоку); shoe — цвет (дальняя нога темнее)
+function footSvg(l, side, R, turn = 0, shoe = R.shoe) {
+  const out = side === 'L' ? -1 : 1, [x, y] = l.ankle, at = Math.min(1, Math.abs(turn)), dir = Math.sign(turn) || 1;
+  const cx = out * 6 * (1 - at) + dir * 14 * at, rx = 31 + 12 * at;
+  return `<g transform="translate(${x.toFixed(1)},${y.toFixed(1)}) rotate(${(dir * at * (l.footAng || 0)).toFixed(1)})">
+    <ellipse cx="${cx.toFixed(1)}" cy="${R.ankle * .2}" rx="${rx.toFixed(1)}" ry="${R.ankle * .8}" fill="${shoe}" stroke="${S}" stroke-width="${W}"/>
+    <path d="M${(cx - 16).toFixed(1)},${R.ankle * .2 - 6} q16,-7 32,0" stroke="#fff" stroke-width="3" fill="none" opacity=".25" stroke-linecap="round"/></g>`;
+}
+// обе ноги (рисуются ДО торса: верх бедра прячется под низом корпуса); при повороте дальняя нога — первой.
+// L — нога слева на экране анфас (анатомически правая): повернувшись лицом вправо (turn > 0), он ближе к камере левой-экранной.
 function legsSvg(g) {
   if (!g) return '';
   const R = g.rig, p = q => [+q[0].toFixed(1), +q[1].toFixed(1)];
-  return ['L', 'R'].map(side => { const l = g[side]; return tube([l.hip, l.knee, l.ankle].map(p), R.width, R.trouser) + footSvg(l, side, R); }).join('');
+  const turn = g.turn || 0, far = turn > 0 ? 'R' : 'L', k = Math.min(1, Math.abs(turn)) * .18;   // дальняя нога темнее до 18 %
+  return (turn > 0 ? ['R', 'L'] : ['L', 'R']).map(side => {
+    const l = g[side], dk = side === far && k > 0;
+    return tube([l.hip, l.knee, l.ankle].map(p), R.width, dk ? shade(R.trouser, k) : R.trouser) + footSvg(l, side, R, turn, dk ? shade(R.shoe, k) : R.shoe);
+  }).join('');
 }

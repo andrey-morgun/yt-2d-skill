@@ -18,10 +18,12 @@ function stageEnv(t, members = []) {
   return out;
 }
 
-function stagePlacement(m) {
+function stagePlacement(m, t) {
   // умолчания: shot.cast[i] → TIMELINE.cast[who].at → раскладка (TIMELINE.stage.preset: cast[who] | default) → (0,0,1)
-  const LY = stageLayout(), d = { ...(LY.cast[m.who] || LY.default || {}), ...((TIMELINE.cast && TIMELINE.cast[m.who] && TIMELINE.cast[m.who].at) || {}) };
-  const x = m.x ?? d.x ?? 0, y = m.y ?? d.y ?? 0, s = m.s ?? d.s ?? 1, flip = m.flip ?? d.flip ?? false, sx = flip ? -s : s;
+  // t задан и у персонажа есть путь (TIMELINE.cast[who].path, src/path.js) — мировая x из пути (перекрывает остальные x)
+  const LY = stageLayout(), C = TIMELINE.cast && TIMELINE.cast[m.who], d = { ...(LY.cast[m.who] || LY.default || {}), ...((C && C.at) || {}) };
+  const px = t != null && C && C.path ? pathAt(C.path, t).x : null;
+  const x = px ?? m.x ?? d.x ?? 0, y = m.y ?? d.y ?? 0, s = m.s ?? d.s ?? 1, flip = m.flip ?? d.flip ?? false, sx = flip ? -s : s;
   return { x, y, s, sx, transform: `translate(${x},${y}) translate(360,1280) scale(${sx},${s}) translate(-360,-1280)`,
     toWorld: ([lx, ly]) => [x + 360 + sx * (lx - 360), y + 1280 + s * (ly - 1280)] };
 }
@@ -44,7 +46,7 @@ function stageDraw(t, shot) {
     const ch = CHARS[m.who];
     if (!ch) throw new Error(`shot "${shot.id}": неизвестный персонаж "${m.who}" (есть: ${Object.keys(CHARS).join(', ')})`);
     const dup = cast.findIndex(o => o.who === m.who) !== i;
-    return { m, ch, st: charState(t, shot, m.who), pl: stagePlacement(m), P: m.who + (dup ? i : '') + '_' };
+    return { m, ch, st: charState(t, shot, m.who), pl: stagePlacement(m, t), P: m.who + (dup ? i : '') + '_' };
   });
   const env = stageEnv(t, members);
   const back = stageFn(shot.back ?? SG.back, 'back'), front = stageFn(shot.front ?? SG.front, 'front');

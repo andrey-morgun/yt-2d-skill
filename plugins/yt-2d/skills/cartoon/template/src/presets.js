@@ -150,7 +150,7 @@ const POSES = {
   point:    ctx => aimPose(ctx, 'point', 0, 1),
   reach:    ctx => ({ ...aimPose(ctx, 'kiss', 0, .8), dur: .3 }),
   // руки вдоль тела — стоящий персонаж (полный рост); кисть пальцами вниз, чуть наружу от бедра
-  hang:     ({ sh }) => ({ wrist: [sh[0] - 14, sh[1] + 196], hand: 'rest', rot: 0, layer: 'front', elbow: [sh[0] - 10, sh[1] + 100], arc: 0, bob: .4 }),
+  hang:     ({ sh }) => ({ wrist: [sh[0] - 14, sh[1] + 196], hand: 'rest', rot: 0, layer: 'front', elbow: [sh[0] - 10, sh[1] + 100], arc: 0, bob: .4, swing: 1 }),
 };
 // кисть по направлению на цель: запястье на луче плечо→цель (длина ≈ 2/3 расстояния, 120…175 px), палец вдоль предплечья
 function aimPose(ctx, hand, rot, reach) {
@@ -186,18 +186,25 @@ const HEAD_POSES = {
 // ── стойки ног (TIMELINE.cast[who].poses.legs: [{ t, pose, …переопределения }]) ──
 // Функции получают ctx = { LR (риг ног персонажа, rig.js legsRigOf), k } и возвращают { hipDy, L:{ ankle, knee?, … }, R:{…} }.
 const LEG_POSES = {
-  // стоя: стопы под бёдрами чуть шире, подошвы на полу
-  stand: ({ LR }) => ({ hipDy: 0,
-    L: { ankle: [LR.L.hip[0] - 4, FLOOR - LR.ankle] },
-    R: { ankle: [LR.R.hip[0] + 4, FLOOR - LR.ankle] } }),
-  // сидя анфас: сиденье на высоте колена стоя (или k.seat — локальный y бёдер), бёдра к камере — в проекции короткие,
-  // колени чуть ниже и шире бёдер, голени отвесно до пола; ноги поверх низа торса (layer front)
+  // стоя: стопы под бёдрами чуть шире, подошвы на полу; при повороте сходятся вслед за бёдрами
+  stand: ({ LR }) => {
+    const leg = (side, out) => ({ turn }) => ({ ankle: [legHipX(LR[side], turn) + out * 4 * (1 - Math.min(1, Math.abs(turn))), FLOOR - LR.ankle] });
+    return { hipDy: 0, L: leg('L', -1), R: leg('R', 1) };
+  },
+  // сидя: сиденье на высоте колена стоя (или k.seat — локальный y бёдер). Анфас бёдра смотрят в камеру — в проекции короткие,
+  // колени чуть ниже и шире бёдер, поверх низа торса (layer front); в профиль бедро горизонтально вперёд по ходу взгляда.
+  // Голени отвесно до пола.
   sit: ({ LR, k }) => {
     const hipY = k.seat ?? (FLOOR - LR.ankle - LR.L.len[1] + 4), hipDy = hipY - LR.L.hip[1];
-    const leg = (H, out) => { const kx = H[0] + out * 10; return { knee: [kx, hipY + 14], ankle: [kx, FLOOR - LR.ankle] }; };
-    return { hipDy, layer: 'front', L: leg(LR.L.hip, -1), R: leg(LR.R.hip, 1) };
+    const leg = (side, out) => ({ turn }) => {
+      const at = Math.min(1, Math.abs(turn)), dir = Math.sign(turn) || 1, hx = legHipX(LR[side], turn);
+      const kx = hx + out * 10 * (1 - at) + dir * LR[side].len[0] * .92 * at, ky = hipY + 14 * (1 - at) + 4 * at;
+      return { knee: [kx, ky], ankle: [kx + dir * 6 * at, FLOOR - LR.ankle] };
+    };
+    return { hipDy, layer: 'front', L: leg('L', -1), R: leg('R', 1) };
   },
 };
+const STAND_KEYS = [{ t: 0, pose: 'stand' }];   // стойка по умолчанию у персонажа с ногами и путём, но без poses.legs
 const _legs = new WeakMap();
 function resolveLegs(keys, who) {
   if (!keys) return null;

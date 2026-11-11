@@ -39,7 +39,7 @@
   // document.write держит классические скрипты синхронными и в порядке объявления.
   const EP_QUERY = new URLSearchParams(location.search);
   const EP = (EP_QUERY.get('ep') || 'tolyan').replace(/[^\w-]/g, '');
-  ['src/lib.js', 'src/rig.js', `episodes/${EP}/timeline.js`].forEach(s => document.write(`<script src="${s}"><\/script>`));
+  ['src/lib.js', 'src/rig.js', 'src/path.js', `episodes/${EP}/timeline.js`].forEach(s => document.write(`<script src="${s}"><\/script>`));
 </script>
 <script>
   // озвучка: episodes/<ep>/voice.js (VOICE) генерируется voice/build.mjs из TIMELINE.voice. Файла может не быть —
