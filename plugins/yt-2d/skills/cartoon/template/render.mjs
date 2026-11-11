@@ -5,6 +5,8 @@
 //   --sfx      собрать фоли-дорожку (sfx/build.mjs) и подмешать её в mp4 (AAC 192k)
 //   --voice    собрать озвучку (voice/build.mjs: TIMELINE.voice → voice.js + voice/mix.wav; API только для новых реплик,
 //              нужен OPENROUTER_API_KEY: node --env-file=.env render.mjs …) и подмешать её; с --sfx фоли приглушаются на −6 dB под речью
+//   --audio-out f.wav  звук эпизода (фоли/озвучка по --sfx/--voice, иначе тишина) — отдельным WAV (PCM float 48 кГц) ровно на длину видео
+//              (кадров × 1600 сэмплов), а mp4 — без звука. Так сцены собирает show.mjs: звук склеивается встык без дрейфа
 //   --preview  быстрый черновик: = --dsf 1 --preset veryfast (контакт-лист, проверка движения)
 //   --final    чистовой: = --dsf 2 --preset slow (умолчание); явные --dsf/--preset перекрывают оба
 //   --keep-frames  дополнительно сохранить PNG-кадры в FRAMES_DIR (отладка). Без него кадры идут в ffmpeg через pipe и на диск
@@ -42,7 +44,8 @@ if (PREVIEW && FINAL) fail('--preview и --final одновременно не �
 
 const ep = opt('--ep', 'tolyan');
 if (!/^[\w-]+$/.test(ep)) fail(`--ep: только латиница, цифры, - и _ (получено "${ep}")`);
-const stillsArg = opt('--stills', null);
+const stillsArg = opt('--stills', null), AUDIO_OUT = opt('--audio-out', null);
+if (AUDIO_OUT && (stillsArg || !AUDIO_OUT.endsWith('.wav'))) fail('--audio-out: путь .wav, и только для видео (не со --stills)');
 const stills = stillsArg ? stillsArg.split(',').map(s => Number(s.trim())) : null;
 if (stills && (!stills.length || stills.some(t => !Number.isFinite(t) || t < 0))) fail(`--stills: ожидались секунды через запятую, получено "${stillsArg}"`);
 const FPS = 30, DSF = Number(opt('--dsf', PREVIEW ? '1' : '2')), PRESET = opt('--preset', PREVIEW ? 'veryfast' : 'slow');
@@ -196,20 +199,34 @@ if (!stills) {
   renameSync(videoTmp, out);
   console.log(`→ ${out} (encode tail ${secs(t1)}s, total ${secs(t0)}s)`);
 
-  if (SFX_ON || VOICE_ON) { // звук: фоли (sfx/build.mjs → out/<name>.sfx.wav) и/или озвучка (voice/mix.wav) → AAC
-    const wav = out.replace(/\.mp4$/, '.sfx.wav'), tmpOut = out.replace(/\.mp4$/, '.sfx-tmp.mp4');
-    if (SFX_ON) await run(process.execPath, [path.join(dir, 'sfx', 'build.mjs'), '--ep', ep, '--out', wav]).catch(e => fail(e.message));
-    if (VOICE_ON && !existsSync(voiceWav)) fail(`нет ${voiceWav} — voice/build.mjs не собрал стем`);
+  // ── звук: фоли (sfx/build.mjs → <out>.sfx.wav) и/или озвучка (voice/mix.wav) ──
+  const wav = out.replace(/\.mp4$/, '.sfx.wav');
+  if (SFX_ON) await run(process.execPath, [path.join(dir, 'sfx', 'build.mjs'), '--ep', ep, '--out', wav]).catch(e => fail(e.message));
+  if (VOICE_ON && !existsSync(voiceWav)) fail(`нет ${voiceWav} — voice/build.mjs не собрал стем`);
+  // фоли под речью приглушаются на −6 dB: окна реплик из voice.js (вход 0.15 с, выход 0.3 с), как duck в sfx/build.mjs
+  const duckExpr = () => {
+    const VOICE = runInNewContext(readFileSync(voiceJs, 'utf8') + '\n;VOICE', {}, { filename: voiceJs });
+    const win = VOICE.lines.filter(l => l.talk.length).map(l => [l.talk[0][0], l.talk[l.talk.length - 1][1]]);
+    return win.length ? `1-0.5*min(1,${win.map(([a, b]) => `(clip((t-(${(a - .15).toFixed(3)}))/.15,0,1)-clip((t-${b.toFixed(3)})/.3,0,1))`).join('+')})` : '1';
+  };
+  const LIMIT = 'alimiter=limit=0.891:attack=2:release=60:level=disabled';
+
+  if (AUDIO_OUT) { // звук отдельным файлом (show.mjs): ровно кадров/FPS секунд, PCM float — без перекодирования до финальной склейки
+    const SR = 48000, N = times.length * SR / FPS, fit = `apad=whole_len=${N},atrim=end_sample=${N}`;
+    const ins = [...(SFX_ON ? ['-i', wav] : []), ...(VOICE_ON ? ['-i', voiceWav] : [])];
+    const graph = SFX_ON && VOICE_ON ? `[0:a]volume='${duckExpr()}':eval=frame[s];[s][1:a]amix=inputs=2:normalize=0:duration=first,${LIMIT},${fit}[a]`
+      : ins.length ? `[0:a]${fit}[a]` : `anullsrc=r=${SR}:cl=stereo,atrim=end_sample=${N}[a]`;
+    mkdirSync(path.dirname(path.resolve(AUDIO_OUT)), { recursive: true });
+    await run('ffmpeg', ['-y', '-v', 'error', ...ins, '-filter_complex', graph, '-map', '[a]', '-ar', String(SR), '-ac', '2', '-c:a', 'pcm_f32le', path.resolve(AUDIO_OUT)])
+      .catch(e => fail(e.message));
+    console.log(`→ звук ${[SFX_ON && 'sfx', VOICE_ON && 'voice'].filter(Boolean).join(' + ') || 'тишина'}: ${AUDIO_OUT} (${N} сэмплов = ${times.length} кадров)`);
+  } else if (SFX_ON || VOICE_ON) { // звук внутрь mp4 → AAC
+    const tmpOut = out.replace(/\.mp4$/, '.sfx-tmp.mp4');
     const inputs = ['-i', out, ...(SFX_ON ? ['-i', wav] : []), ...(VOICE_ON ? ['-i', voiceWav] : [])];
     let audio = ['-map', '0:v:0', '-map', '1:a:0'];
-    if (SFX_ON && VOICE_ON) {
-      // фоли под речью приглушаются на −6 dB: окна реплик из voice.js (вход 0.15 с, выход 0.3 с), как duck в sfx/build.mjs
-      const VOICE = runInNewContext(readFileSync(voiceJs, 'utf8') + '\n;VOICE', {}, { filename: voiceJs });
-      const win = VOICE.lines.filter(l => l.talk.length).map(l => [l.talk[0][0], l.talk[l.talk.length - 1][1]]);
-      const duck = win.length ? `1-0.5*min(1,${win.map(([a, b]) => `(clip((t-(${(a - .15).toFixed(3)}))/.15,0,1)-clip((t-${b.toFixed(3)})/.3,0,1))`).join('+')})` : '1';
-      audio = ['-filter_complex', `[1:a]volume='${duck}':eval=frame[s];[s][2:a]amix=inputs=2:normalize=0:duration=first,alimiter=limit=0.891:attack=2:release=60:level=disabled[a]`,
+    if (SFX_ON && VOICE_ON)
+      audio = ['-filter_complex', `[1:a]volume='${duckExpr()}':eval=frame[s];[s][2:a]amix=inputs=2:normalize=0:duration=first,${LIMIT}[a]`,
         '-map', '0:v:0', '-map', '[a]'];
-    }
     await run('ffmpeg', ['-y', '-v', 'error', ...inputs, ...audio, '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k',
       '-shortest', '-movflags', '+faststart', tmpOut]).catch(e => fail(e.message));
     renameSync(tmpOut, out);
