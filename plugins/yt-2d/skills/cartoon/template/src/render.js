@@ -1,4 +1,7 @@
 // ─── render(t) ─────────────────────────────────────────────────────────────
+// Размер кадра, px: TIMELINE.frame = { w, h }. По умолчанию 720×1280 — вертикаль (старые эпизоды, Shorts); лонгформ — 1920×1080.
+// Камера [cx, cy, s] ставит мировую точку (cx, cy) в центр кадра с масштабом s (px кадра на мировую единицу).
+const FRAME = { w: 720, h: 1280, ...(TIMELINE.frame || {}) };
 // shot.cam: массив [[t,cx,cy,s],[t,cx,cy,s]] либо пресет ('wide', 'cu:palych', …) — раскрывает resolveCam (src/presets.js)
 function camAt(shot, t) {
   const [a, b] = resolveCam(shot), k = easeInOut(prog(t, a[0], b[0]));
@@ -111,7 +114,7 @@ window.render = function (t) {
   const svg = draw(t, shot, charState(t, shot));
   const cam = document.getElementById('cam');
   cam.innerHTML = svg;
-  cam.style.transform = `translate(${360 - c.x * c.s + sh.x}px, ${640 - c.y * c.s + sh.y}px) scale(${c.s})`;
+  cam.style.transform = `translate(${FRAME.w / 2 - c.x * c.s + sh.x}px, ${FRAME.h / 2 - c.y * c.s + sh.y}px) scale(${c.s})`;
   document.getElementById('ui').innerHTML = badges(t) + subtitle(t);
   const fi = Math.round(t * 30);
   document.querySelectorAll('.grain').forEach((g, i) => g.style.display = i === fi % 6 ? 'block' : 'none');

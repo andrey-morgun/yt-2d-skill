@@ -11,7 +11,8 @@
 //   Если в TIMELINE есть voice, а episodes/<ep>/voice.js ещё нет, он собирается автоматически БЕЗ API (voice/build.mjs --no-api):
 //   реплики из кэша, остальные — заглушки по оценке длительности. Настоящая озвучка — только по --voice.
 //   --jobs N   параллельных процессов Chrome (кадры независимы; по умолчанию min(4, cpu-2); 4 ≈ 7× быстрее одного)
-//   --dsf N    deviceScaleFactor (2 = суперсэмплинг 1440×2560 → 720×1280; 1 = быстрый превью)
+//   --dsf N    deviceScaleFactor (2 = суперсэмплинг: снимаем вдвое крупнее и уменьшаем lanczos до размера кадра; 1 = быстрый превью)
+//   Размер кадра — TIMELINE.frame = { w, h } (чётные px), по умолчанию 720×1280
 //   --preset   пресет x264 (по умолчанию slow)
 //   FRAMES_DIR каталог для PNG-кадров (по умолчанию .frames рядом со скриптом; после рендера можно удалить — это гигабайты)
 //   CHROME_PATH путь к Chrome/Chromium, если Google Chrome не установлен в стандартное место
@@ -79,6 +80,7 @@ if (!VOICE_ON && hasVoice && !existsSync(voiceJs)) {
 // и параллельные скриншоты виснут. Снимаем через сырой CDP Page.captureScreenshot (clip.scale = DSF):
 // байт-в-байт то же PNG, что у page.screenshot(), но без его накладных расходов (~2.4× быстрее).
 const browsers = [];
+let FRAME = null;   // { w, h } — размер кадра эпизода (FRAME в src/render.js); узнаём у первой страницы
 const die = async msg => { await Promise.all(browsers.map(b => b.close().catch(() => {}))); fail(msg); };
 // voice=0: voice.js ещё не собран — index.html не должен пытаться его грузить (несуществующий script на file:// = ошибка страницы)
 const pageUrl = pathToFileURL(path.join(dir, 'index.html')).href + `?ep=${encodeURIComponent(ep)}` + (existsSync(voiceJs) ? '' : '&voice=0');
@@ -101,10 +103,16 @@ async function openPage() {
   await page.evaluate(() => Promise.all([...document.fonts].map(f => f.load())).then(() => document.fonts.ready));
   if (errors.length) await die(`ошибки на странице:\n  ${errors.join('\n  ')}`);
   if (!await page.$('#stage')) await die('#stage не найден в index.html');
+  // размер кадра: viewport открыт как 720×1280 (умолчание); у эпизода с TIMELINE.frame — пересобираем под него
+  const fr = await page.evaluate(() => typeof FRAME === 'object' && FRAME ? { w: FRAME.w, h: FRAME.h } : null);
+  if (!fr || ![fr.w, fr.h].every(v => Number.isInteger(v) && v > 0 && v % 2 === 0))
+    await die(`TIMELINE.frame: нужны чётные целые w и h в px (получено ${JSON.stringify(fr)})`);
+  if (fr.w !== 720 || fr.h !== 1280) await page.setViewport({ width: fr.w, height: fr.h, deviceScaleFactor: DSF });
+  FRAME ??= fr;
   const cdp = await page.createCDPSession();
   return { page, cdp, errors };
 }
-const shoot = (cdp, file) => cdp.send('Page.captureScreenshot', { format: 'png', optimizeForSpeed: true, clip: { x: 0, y: 0, width: 720, height: 1280, scale: DSF } })
+const shoot = (cdp, file) => cdp.send('Page.captureScreenshot', { format: 'png', optimizeForSpeed: true, clip: { x: 0, y: 0, width: FRAME.w, height: FRAME.h, scale: DSF } })
   .then(r => writeFile(file, Buffer.from(r.data, 'base64')));
 
 const first = await openPage();
@@ -131,7 +139,7 @@ try {
   }));
 } catch (e) { await die(e.message); }
 await Promise.all(browsers.map(b => b.close()));
-console.log(`\rcaptured ${times.length} frames in ${((Date.now() - t0) / 1000).toFixed(1)}s (${jobs} jobs, dsf ${DSF}) → ${framesDir}`);
+console.log(`\rcaptured ${times.length} frames ${FRAME.w}×${FRAME.h} in ${((Date.now() - t0) / 1000).toFixed(1)}s (${jobs} jobs, dsf ${DSF}) → ${framesDir}`);
 
 const run = (cmd, a) => new Promise((res, rej) => spawn(cmd, a, { stdio: 'inherit' })
   .on('error', e => rej(new Error(`${cmd}: ${e.message}`)))
@@ -140,7 +148,7 @@ const run = (cmd, a) => new Promise((res, rej) => spawn(cmd, a, { stdio: 'inheri
 if (!stills) {
   const t1 = Date.now();
   await run('ffmpeg', ['-y', '-v', 'error', '-framerate', String(FPS), '-i', path.join(framesDir, 'f_%04d.png'),
-    '-vf', 'scale=720:1280:flags=lanczos', '-c:v', 'libx264', '-preset', PRESET, '-crf', '17', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', out])
+    '-vf', `scale=${FRAME.w}:${FRAME.h}:flags=lanczos`, '-c:v', 'libx264', '-preset', PRESET, '-crf', '17', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', out])
     .catch(e => fail(e.message));
   console.log(`→ ${out} (encode ${((Date.now() - t1) / 1000).toFixed(1)}s)`);
 

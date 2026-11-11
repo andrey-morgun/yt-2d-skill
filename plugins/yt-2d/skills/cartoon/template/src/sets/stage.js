@@ -83,5 +83,6 @@ function stageDraw(t, shot) {
   }
   return stageWrap(scene);
 }
-const stageWrap = inner => `<svg viewBox="0 0 720 1280" width="720" height="1280" xmlns="http://www.w3.org/2000/svg" style="overflow:visible">${inner}</svg>`;
+// SVG размером с кадр (FRAME — src/render.js); мир шире кадра виден через overflow:visible
+const stageWrap = inner => `<svg viewBox="0 0 ${FRAME.w} ${FRAME.h}" width="${FRAME.w}" height="${FRAME.h}" xmlns="http://www.w3.org/2000/svg" style="overflow:visible">${inner}</svg>`;
 (window.SETS = window.SETS || {}).stage = (t, shot) => stageDraw(t, shot);

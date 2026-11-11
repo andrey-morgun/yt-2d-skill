@@ -4,7 +4,7 @@
 #   bash tests/regress.sh          # = check: отрендерить стиллы и сравнить с tests/baseline/<ep>/
 #   bash tests/regress.sh save     # перезаписать эталоны — только когда изменение задумано (отдельным коммитом с объяснением)
 #   bash tests/regress.sh check tolyan   # только указанные эпизоды
-# Стиллы рендерятся с --dsf 1 (720×1280): эталоны лёгкие для git, а любое изменение кадра всё равно ловится.
+# Стиллы рендерятся с --dsf 1 (в размер кадра эпизода): эталоны лёгкие для git, а любое изменение кадра всё равно ловится.
 # Нужен Chrome: см. CHROME_PATH в render.mjs.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -13,11 +13,12 @@ cd "$(dirname "$0")/.."
 declare -A STILLS=(
   [tolyan]="0.5,2.1,4.3,4.9,5.8,7.6"
   [garazh]="2,5.5,7.8,9.5,14,16.3,20,26,40,44,48,52,57.8,67.5,77,79.5"
+  [hd-test]="1.5,7,9.5"   # 1920×1080: общий план + бейдж + субтитры, крупный план, блэкаут
 )
 
 mode=${1:-check}; shift || true
 [[ $mode == check || $mode == save ]] || { echo "usage: $0 [check|save] [ep…]" >&2; exit 2; }
-eps=("$@"); [[ ${#eps[@]} -gt 0 ]] || eps=(tolyan garazh)
+eps=("$@"); [[ ${#eps[@]} -gt 0 ]] || mapfile -t eps < <(printf '%s\n' "${!STILLS[@]}" | sort)
 
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 fail=0

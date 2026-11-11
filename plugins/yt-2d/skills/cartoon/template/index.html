@@ -3,17 +3,18 @@
 <link rel="stylesheet" href="fonts/fonts.css">
 <style>
   html, body { margin: 0; background: #000; }
-  #stage { position: relative; width: 720px; height: 1280px; overflow: hidden; background: #1a120c; }
-  #cam { position: absolute; left: 0; top: 0; width: 720px; height: 1280px; transform-origin: 0 0; }
+  /* размер кадра: --fw/--fh выставляет скрипт ниже из FRAME (TIMELINE.frame, по умолчанию 720×1280) */
+  #stage { position: relative; width: var(--fw, 720px); height: var(--fh, 1280px); overflow: hidden; background: #1a120c; }
+  #cam { position: absolute; left: 0; top: 0; width: var(--fw, 720px); height: var(--fh, 1280px); transform-origin: 0 0; }
   #cam svg { display: block; }
   /* тёплая плёнка поверх всего кадра — половина «лука» */
   #warm { position: absolute; inset: 0; background: rgba(255,170,80,.22); mix-blend-mode: soft-light; pointer-events: none; }
   #haze { position: absolute; inset: 0; background: radial-gradient(ellipse at 45% 30%, rgba(255,210,140,.18), transparent 60%); mix-blend-mode: screen; }
   #vignette { position: absolute; inset: 0; background: radial-gradient(ellipse 75% 62% at 50% 46%, transparent 52%, rgba(22,12,6,.55) 82%, rgba(10,5,2,.85) 100%); }
   #flicker { position: absolute; inset: 0; background: #fff3d8; mix-blend-mode: overlay; }
-  .grain { position: absolute; inset: 0; width: 720px; height: 1280px; opacity: .16; mix-blend-mode: overlay; display: none; }
+  .grain { position: absolute; inset: 0; width: var(--fw, 720px); height: var(--fh, 1280px); opacity: .16; mix-blend-mode: overlay; display: none; }
   #ui { position: absolute; inset: 0; }
-  .sub { position: absolute; left: 50%; top: 1112px; white-space: nowrap; transform-origin: 50% 50%;
+  .sub { position: absolute; left: 50%; top: calc(var(--fh, 1280px) - 168px); white-space: nowrap; transform-origin: 50% 50%;
          background: rgba(26,20,16,.9); border-radius: 9px; padding: 10px 21px 12px;
          font: 800 34px/1 Rubik, sans-serif; color: #fff; box-shadow: 0 4px 0 rgba(0,0,0,.35); letter-spacing: .2px; }
   .sub .hl { color: #ffc93a; }
@@ -59,12 +60,15 @@
 <script src="src/overlays.js"></script>
 <script src="src/render.js"></script>
 <script>
-  // зерно: 6 детерминированных тайлов, меняются каждый кадр
+  // размер кадра (FRAME — src/render.js) → CSS-переменные #stage
+  document.getElementById('stage').style.setProperty('--fw', FRAME.w + 'px');
+  document.getElementById('stage').style.setProperty('--fh', FRAME.h + 'px');
+  // зерно: 6 детерминированных тайлов в половину разрешения кадра, растянуты на кадр, меняются каждый кадр
   (function () {
-    const host = document.getElementById('grains');
+    const host = document.getElementById('grains'), gw = Math.ceil(FRAME.w / 2), gh = Math.ceil(FRAME.h / 2);
     for (let k = 0; k < 6; k++) {
-      const c = document.createElement('canvas'); c.width = 360; c.height = 640; c.className = 'grain';
-      const ctx = c.getContext('2d'), img = ctx.createImageData(360, 640);
+      const c = document.createElement('canvas'); c.width = gw; c.height = gh; c.className = 'grain';
+      const ctx = c.getContext('2d'), img = ctx.createImageData(gw, gh);
       let s = 1234 + k * 999;
       for (let i = 0; i < img.data.length; i += 4) {
         s = (s * 16807) % 2147483647; const v = 128 + ((s / 2147483647) - .5) * 255;
