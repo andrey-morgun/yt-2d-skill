@@ -1,4 +1,6 @@
-# garazh — cartoon reels from your own story, with Claude Code
+# yt-2d — 2D cartoons for YouTube, rendered from code with Claude Code
+
+> Fork of [lubluniky/garazh-skill](https://github.com/lubluniky/garazh-skill), being reworked for horizontal 1920×1080 long-form videos (5–10 min) in English. Until that work lands, everything below describes the original engine (vertical reels).
 
 A Claude Code skill + a small rendering engine that turns a one-line idea into a **vertical cartoon reel** (720×1280, 30 fps, 8–90 s) in a deadpan «garage IT-startup» style: flat 2D with thick brown outlines, warm film grain, karaoke subtitles, name badges with joke job titles, a Claude chat on a laptop screen, procedural foley and optional TTS voice-over.
 
@@ -13,8 +15,8 @@ Everything is code: SVG scenes are pure functions of time, rendered frame-by-fra
 **As a plugin (recommended):**
 
 ```
-/plugin marketplace add lubluniky/garazh-skill
-/plugin install garazh@garazh-skill
+/plugin marketplace add andrey-morgun/yt-2d-skill
+/plugin install yt-2d@yt-2d-skill
 ```
 
 No GitHub SSH key? Start Claude Code with `CLAUDE_CODE_PLUGIN_PREFER_HTTPS=1`.
@@ -22,9 +24,9 @@ No GitHub SSH key? Start Claude Code with `CLAUDE_CODE_PLUGIN_PREFER_HTTPS=1`.
 **Manually:** copy only the skill folder.
 
 ```bash
-git clone https://github.com/lubluniky/garazh-skill
-mkdir -p ~/.claude/skills/cartoon-reel
-cp -R garazh-skill/plugins/garazh/skills/cartoon-reel/. ~/.claude/skills/cartoon-reel/
+git clone https://github.com/andrey-morgun/yt-2d-skill
+mkdir -p ~/.claude/skills/cartoon
+cp -R yt-2d-skill/plugins/yt-2d/skills/cartoon/. ~/.claude/skills/cartoon/
 ```
 
 On first use the skill deploys the engine (the «studio») to `~/cartoon-studio` (override with `CARTOON_STUDIO=/path`) and runs `npm install` there.
@@ -101,9 +103,9 @@ node --env-file=.env render.mjs --ep myep out/myep.mp4 --final --voice --sfx
 
 ```
 .claude-plugin/marketplace.json
-plugins/garazh/
+plugins/yt-2d/
   .claude-plugin/plugin.json
-  skills/cartoon-reel/
+  skills/cartoon/
     SKILL.md               workflow Claude follows
     references/            style guide, engine/timeline API, reference contact sheets
     scripts/               bootstrap.sh (deploy the studio), sync-template.sh
@@ -126,8 +128,8 @@ plugins/garazh/
 Установка:
 
 ```
-/plugin marketplace add lubluniky/garazh-skill
-/plugin install garazh@garazh-skill
+/plugin marketplace add andrey-morgun/yt-2d-skill
+/plugin install yt-2d@yt-2d-skill
 ```
 
 Дальше просто попросите Claude: «сделай мультик garazh про …».

@@ -1,9 +1,9 @@
 ---
-name: cartoon-reel
+name: cartoon
 description: Makes vertical cartoon reels (720×1280@30, 8–90 s) in a «garage IT-startup» style, rendered from code (SVG in headless Chrome → ffmpeg) with procedural foley and optional TTS voice-over (fish-audio/drama-3 via OpenRouter or Fish Audio). Делает вертикальные мультяшные рилсы (720×1280@30, 8–90 с) в стиле «гаражный IT-стартап». Плоский 2D, тёплая плёнка, deadpan-юмор, караоке-субтитры, бейджи «ИМЯ / РОЛИ», UI Claude на экране. Ролик собирается кодом (SVG в Chrome → ffmpeg) с процедурными звуковыми эффектами; озвучка реплик — через OpenRouter TTS (fish-audio/drama-3) с кэшем. Использовать, когда просят мультик, рилс, анимированный скетч, новый эпизод с Толяном или ролик «как тот рилс про гараж», а также для правок персонажей, поз, таймингов и звука в студии cartoon-studio.
 ---
 
-# cartoon-reel
+# cartoon
 
 Из идеи в одну строку получается готовый mp4. `${CLAUDE_SKILL_DIR}` — каталог этого скилла (Claude Code подставляет его сам). Движок — студия `$STUDIO`: `$CARTOON_STUDIO`, иначе `~/Documents/cartoon-studio.nosync` (если есть), иначе `~/cartoon-studio` — ровно так её ищут скрипты (`scripts/studio-path.sh`). Каждый эпизод — это данные (`episodes/<ep>/timeline.js` + `sfx.mjs`) поверх общего движка `src/`.
 

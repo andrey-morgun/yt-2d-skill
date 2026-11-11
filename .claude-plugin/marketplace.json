@@ -1,11 +1,11 @@
 {
-  "name": "garazh-skill",
-  "owner": { "name": "lubluniky" },
+  "name": "yt-2d-skill",
+  "owner": { "name": "andrey-morgun" },
   "description": "Code-rendered vertical cartoon reels in the «garage IT-startup» style for Claude Code",
   "plugins": [
     {
-      "name": "garazh",
-      "source": "./plugins/garazh",
+      "name": "yt-2d",
+      "source": "./plugins/yt-2d",
       "description": "Skill + engine: write a script, draw characters, voice them (Fish Audio / OpenRouter TTS) and render a 720×1280 cartoon reel with Claude Code"
     }
   ]
